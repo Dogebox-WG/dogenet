@@ -2,17 +2,17 @@ package msg
 
 // VersionMessage represents the structure of the version message
 type VersionMessage struct {
-	Version    int32
-	Services   uint64
-	Timestamp  int64
-	RemoteAddr NetAddr // network address of the node receiving this message
+	Version    int32   // PROTOCOL_VERSION
+	Services   uint64  // nLocalNodeServices
+	Timestamp  int64   // nTime: UNIX time in seconds
+	RemoteAddr NetAddr // addrYou: network address of the node receiving this message
 	// version ≥ 106
-	LocalAddr NetAddr // network address of the node emitting this message (now ignored)
-	Agent     string
-	Nonce     uint64 // randomly generated every time a version packet is sent
-	Height    int32  // last block received by the emitting node
+	LocalAddr NetAddr // addrMe: network address of the node emitting this message (now ignored)
+	Nonce     uint64  // nonce: randomly generated every time a version packet is sent
+	Agent     string  // strSubVersion:
+	Height    int32   // 32 nNodeStartingHeight
 	// version ≥ 70001
-	Relay bool
+	Relay bool // fRelayTxs
 }
 
 func DecodeVersion(payload []byte) (v VersionMessage) {
@@ -24,8 +24,8 @@ func DecodeVersion(payload []byte) (v VersionMessage) {
 	v.RemoteAddr = DecodeNetAddr(d, 0)
 	if v.Version >= 106 {
 		v.LocalAddr = DecodeNetAddr(d, 0)
-		v.Agent = d.var_string()
 		v.Nonce = d.uint64le()
+		v.Agent = d.var_string()
 		v.Height = int32(d.uint32le())
 		if v.Version >= 70001 {
 			v.Relay = d.bool()
@@ -42,8 +42,8 @@ func EncodeVersion(version VersionMessage) []byte {
 	EncodeNetAddr(version.RemoteAddr, e, 0)
 	if version.Version >= 106 {
 		EncodeNetAddr(version.LocalAddr, e, 0)
-		e.var_string(version.Agent)
 		e.uint64le(version.Nonce)
+		e.var_string(version.Agent)
 		e.uint32le(uint32(version.Height))
 		if version.Version >= 70001 {
 			e.bool(version.Relay)
