@@ -1,9 +1,21 @@
 package msg
 
-// VersionMessage represents the structure of the version message
-type VersionMessage struct {
-	Version    int32   // PROTOCOL_VERSION
-	Services   uint64  // nLocalNodeServices
+type LocalNodeServices uint64
+
+// LocalNodeServices bit flags:
+const (
+	NodeNetwork        LocalNodeServices = 1    // This node can be asked for full blocks instead of just headers.
+	NodeGetUTXO        LocalNodeServices = 2    // See BIP 0064
+	NodeBloom          LocalNodeServices = 4    // See BIP 0111
+	NodeWitness        LocalNodeServices = 8    // See BIP 0144
+	NodeCompactFilters LocalNodeServices = 64   // See BIP 0157
+	NodeNetworkLimited LocalNodeServices = 1024 // See BIP 0159
+)
+
+// VersionMsg represents the structure of the version message
+type VersionMsg struct {
+	Version    int32 // PROTOCOL_VERSION
+	Services   LocalNodeServices
 	Timestamp  int64   // nTime: UNIX time in seconds
 	RemoteAddr NetAddr // addrYou: network address of the node receiving this message
 	// version ≥ 106
@@ -15,11 +27,10 @@ type VersionMessage struct {
 	Relay bool // fRelayTxs
 }
 
-func DecodeVersion(payload []byte) (v VersionMessage) {
-	// https://en.bitcoin.it/wiki/Protocol_documentation#version
+func DecodeVersion(payload []byte) (v VersionMsg) {
 	d := Decode(payload)
 	v.Version = int32(d.uint32le())
-	v.Services = d.uint64le()
+	v.Services = LocalNodeServices(d.uint64le())
 	v.Timestamp = int64(d.uint64le())
 	v.RemoteAddr = DecodeNetAddr(d, 0)
 	if v.Version >= 106 {
@@ -34,10 +45,10 @@ func DecodeVersion(payload []byte) (v VersionMessage) {
 	return
 }
 
-func EncodeVersion(version VersionMessage) []byte {
+func EncodeVersion(version VersionMsg) []byte {
 	e := Encode(86)
 	e.uint32le(uint32(version.Version))
-	e.uint64le(version.Services)
+	e.uint64le(uint64(version.Services))
 	e.uint64le(uint64(version.Timestamp))
 	EncodeNetAddr(version.RemoteAddr, e, 0)
 	if version.Version >= 106 {

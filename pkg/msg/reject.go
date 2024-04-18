@@ -13,14 +13,14 @@ const (
 	REJECT_CHECKPOINT      RejectCode = 0x43
 )
 
-type RejectMessage struct {
+type RejectMsg struct {
 	Message string
 	Code    RejectCode
 	Reason  string
 	Data    []byte
 }
 
-func (m *RejectMessage) CodeName() string {
+func (m *RejectMsg) CodeName() string {
 	switch m.Code {
 	case 0x01:
 		return "malformed"
@@ -43,7 +43,7 @@ func (m *RejectMessage) CodeName() string {
 	}
 }
 
-func DecodeReject(msg []byte) (rej RejectMessage) {
+func DecodeReject(msg []byte) (rej RejectMsg) {
 	d := Decode(msg)
 	rej.Message = d.var_string()
 	rej.Code = RejectCode(d.uint8())

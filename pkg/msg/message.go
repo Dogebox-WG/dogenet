@@ -9,6 +9,7 @@ import (
 // Dogecoin magic bytes for the mainnet
 const MagicBytes = 0xc0c0c0c0
 
+// https://en.bitcoin.it/wiki/Protocol_documentation#version
 type MessageHeader struct {
 	Magic    uint32
 	Command  string
