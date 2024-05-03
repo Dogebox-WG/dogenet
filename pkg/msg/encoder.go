@@ -8,11 +8,16 @@ import (
 
 type Decoder struct {
 	buf []byte
-	pos uint64
+	pos uint64 // current (unread) byte position
+	err bool
 }
 
 func Decode(b []byte) *Decoder {
 	return &Decoder{buf: b, pos: 0}
+}
+
+func (d *Decoder) has(n uint64) bool {
+	return d.pos+n <= uint64(len(d.buf))
 }
 
 func (d *Decoder) bytes(num uint64) []byte {

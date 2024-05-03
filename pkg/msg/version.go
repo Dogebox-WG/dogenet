@@ -30,6 +30,10 @@ type VersionMsg struct {
 func DecodeVersion(payload []byte) (v VersionMsg) {
 	d := Decode(payload)
 	v.Version = int32(d.uint32le())
+	if v.Version == 10300 {
+		// a fixup found in dogecoin-seeder
+		v.Version = 300
+	}
 	v.Services = LocalNodeServices(d.uint64le())
 	v.Timestamp = int64(d.uint64le())
 	v.RemoteAddr = DecodeNetAddr(d, 0)
@@ -37,9 +41,12 @@ func DecodeVersion(payload []byte) (v VersionMsg) {
 		v.LocalAddr = DecodeNetAddr(d, 0)
 		v.Nonce = d.uint64le()
 		v.Agent = d.var_string()
-		v.Height = int32(d.uint32le())
-		if v.Version >= 70001 {
-			v.Relay = d.bool()
+		if v.Version >= 209 {
+			v.Height = int32(d.uint32le())
+			// some peers send version >= 70001 but don't send Relay.
+			if v.Version >= 70001 && d.has(1) {
+				v.Relay = d.bool()
+			}
 		}
 	}
 	return

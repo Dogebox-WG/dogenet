@@ -8,6 +8,7 @@ import (
 
 // Dogecoin magic bytes for the mainnet
 const MagicBytes = 0xc0c0c0c0
+const MaxMsgSize = 0x2000000 // 32MB
 
 // https://en.bitcoin.it/wiki/Protocol_documentation#version
 type MessageHeader struct {
