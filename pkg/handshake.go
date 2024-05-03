@@ -10,7 +10,7 @@ import (
 	"github.com/dogeorg/dogenet/pkg/msg"
 )
 
-// Initial protocol version for version/verack negotiation
+const GobFilePath = "netmap.gob"
 const InitProtocolVersion = 209
 
 // Current Core Node version
@@ -48,13 +48,13 @@ func PawVersionMessage() []byte {
 	// Query seed nodes
 	seedNodes := []string{"seed.multidoge.org"}
 	for _, node := range seedNodes {
-		ips, err := net.LookupIP(node)
-		if err != nil {
-			fmt.Println("Error resolving DNS:", err)
-			continue
-		}
-		for _, ip := range ips {
-			testNode(db, ip.String())
+func RunService(localNode string) {
+	// load the previously saved state.
+	Map = NewNetMap()
+	err := Map.ReadGob(GobFilePath)
+	if err != nil {
+		log.Println("Cannot read Gob file:", err)
+		os.Exit(1) // XXX
 		}
 	}
 */
