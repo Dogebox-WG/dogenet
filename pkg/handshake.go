@@ -61,12 +61,25 @@ type Service interface {
 }
 
 func RunService(localNode string) {
+	// Check if the netmap.gob file exists
+	_, err := os.Stat(GobFilePath)
+	if os.IsNotExist(err) {
+		// Create a new NetMap and write it to netmap.gob
+		initialMap := NewNetMap()
+		initialMap.seedFromFixed() // Seed initial nodes
+		err := initialMap.WriteGob(GobFilePath)
+		if err != nil {
+			log.Println("Cannot write initial NetMap:", err)
+			os.Exit(1)
+		}
+	}
+
 	// load the previously saved state.
 	Map = NewNetMap()
-	err := Map.ReadGob(GobFilePath)
+	err = Map.ReadGob(GobFilePath)
 	if err != nil {
 		log.Println("Cannot read Gob file:", err)
-		os.Exit(1) // XXX
+		os.Exit(1)
 	}
 
 	// cancel context for shutdown.
