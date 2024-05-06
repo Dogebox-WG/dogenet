@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -80,13 +79,22 @@ func RunService(localNode string) {
 
 	// stay connected to local node if specified.
 	if localNode != "" {
-		local := NewCollector(wg, localNode+"/22556", 0)
+		addr := net.ParseIP(localNode)
+		if addr == nil {
+			log.Println("Invalid ip address on command line:", localNode)
+			os.Exit(1)
+		}
+		local := NewCollector(wg, net.JoinHostPort(localNode, "22556"), 0)
 		services = append(services, local)
 	}
 
 	// start connecting to remote nodes.
 	crawler := NewCollector(wg, "", 5*time.Minute)
 	services = append(services, crawler)
+
+	// start the web server.
+	webserver := NewWebAPI(wg, "0.0.0.0", 8086)
+	services = append(services, webserver)
 
 	// Set up signal handling.
 	signals := make(chan os.Signal, 1)
@@ -203,9 +211,8 @@ func NewCollector(wg *sync.WaitGroup, fromAddr string, maxTime time.Duration) Se
 	return c
 }
 
-func (c *Collector) collectAddresses(ctx context.Context, nodeKey string, maxTime time.Duration) {
-	who := nodeKey
-	nodeAddr := convertIPPort(nodeKey)
+func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTime time.Duration) {
+	who := nodeAddr
 	fmt.Printf("[%s] Connecting to node: %s\n", who, nodeAddr)
 
 	d := net.Dialer{Timeout: 30 * time.Second}
@@ -302,23 +309,21 @@ func (c *Collector) collectAddresses(ctx context.Context, nodeKey string, maxTim
 }
 
 func expectVersion(reader *bufio.Reader) (msg.VersionMsg, error) {
-	for {
-		// Core Node implementation: if connection is inbound, send Version immediately.
-		// This means we'll receive the Node's version before `verack` for our Version,
-		// however this is undocumented, so other nodes might ack first.
-		cmd, payload, err := msg.ReadMessage(reader)
-		if err != nil {
-			return msg.VersionMsg{}, fmt.Errorf("Error reading message: %v", err)
-		}
-		if cmd == "version" {
-			return msg.DecodeVersion(payload), nil
-		}
-		if cmd == "reject" {
-			re := msg.DecodeReject(payload)
-			return msg.VersionMsg{}, fmt.Errorf("Reject: %s %s %s", re.CodeName(), re.Message, re.Reason)
-		}
-		return msg.VersionMsg{}, fmt.Errorf("Expected 'version' message from node, but received: %s", cmd)
+	// Core Node implementation: if connection is inbound, send Version immediately.
+	// This means we'll receive the Node's version before `verack` for our Version,
+	// however this is undocumented, so other nodes might ack first.
+	cmd, payload, err := msg.ReadMessage(reader)
+	if err != nil {
+		return msg.VersionMsg{}, fmt.Errorf("error reading message: %v", err)
 	}
+	if cmd == "version" {
+		return msg.DecodeVersion(payload), nil
+	}
+	if cmd == "reject" {
+		re := msg.DecodeReject(payload)
+		return msg.VersionMsg{}, fmt.Errorf("reject: %s %s %s", re.CodeName(), re.Message, re.Reason)
+	}
+	return msg.VersionMsg{}, fmt.Errorf("expected 'version' message from node, but received: %s", cmd)
 }
 
 func sendPong(conn net.Conn, pingPayload []byte, who string) {
@@ -336,15 +341,4 @@ func sendGetAddr(conn net.Conn, who string) {
 		fmt.Printf("[%s] failed to send 'getaddr': %v", who, err)
 		return
 	}
-}
-
-func convertIPPort(key string) string {
-	// convert from key format "ip/port" to net.Dial format
-	elems := strings.Split(key, "/")
-	ip := elems[0]
-	port := elems[1]
-	if strings.ContainsAny(ip, ":") {
-		ip = "[" + ip + "]" // required for IPv6 if port is present
-	}
-	return ip + ":" + port
 }

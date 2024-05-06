@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/dogeorg/dogenet/pkg/msg"
@@ -24,6 +25,7 @@ type NetMapState struct {
 	Nodes     NodeAddressMap // node address -> timstamp, services
 	NewNodes  []string       // queue of newly discovered nodes (high priority)
 	SeedNodes []string       // queue of seed nodes (low priority)
+	migrated  bool           // true after migrateAddresses has run
 }
 
 type NetMap struct {
@@ -42,10 +44,30 @@ func (t *NetMap) Stats() (mapSize int, newNodes int) {
 	return len(t.state.Nodes), len(t.state.NewNodes)
 }
 
+type Payload struct {
+	Address  string                `json:"address"`
+	Time     uint32                `json:"time"`
+	Services msg.LocalNodeServices `json:"services"`
+}
+
+func (t *NetMap) Payload() (res []Payload) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	res = make([]Payload, 0, len(Map.state.Nodes))
+	for key, val := range Map.state.Nodes {
+		res = append(res, Payload{
+			Address:  key,
+			Time:     val.Time,
+			Services: val.Services,
+		})
+	}
+	return
+}
+
 func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services msg.LocalNodeServices) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := address.String() + "/" + strconv.Itoa(int(port)) // maybe use 18-byte IP:Port
+	key := net.JoinHostPort(address.String(), strconv.Itoa(int(port)))
 	old, found := Map.state.Nodes[key]
 	if !found || time > old.Time {
 		// insert or replace
@@ -62,7 +84,7 @@ func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services msg.
 func (t *NetMap) AddNewNode(address net.IP, port uint16) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := address.String() + "/" + strconv.Itoa(int(port)) // maybe use 18-byte IP:Port
+	key := net.JoinHostPort(address.String(), strconv.Itoa(int(port)))
 	Map.state.NewNodes = append(Map.state.NewNodes, key)
 }
 
@@ -138,7 +160,7 @@ func (t *NetMap) seedFromDNS() {
 			continue
 		}
 		for _, ip := range ips {
-			key := ip.String() + "/22556"
+			key := net.JoinHostPort(ip.String(), "22556")
 			t.state.SeedNodes = append(t.state.SeedNodes, key)
 			fmt.Println("Seed from DNS:", key)
 		}
@@ -147,7 +169,7 @@ func (t *NetMap) seedFromDNS() {
 
 func (t *NetMap) seedFromFixed() {
 	for _, seed := range seeds.FixedSeeds {
-		key := net.IP(seed.Host).String() + "/" + strconv.Itoa(seed.Port)
+		key := net.JoinHostPort(net.IP(seed.Host).String(), strconv.Itoa(seed.Port))
 		t.state.SeedNodes = append(t.state.SeedNodes, key)
 		fmt.Println("Seed from Fixture:", key)
 	}
@@ -167,6 +189,10 @@ func (t *NetMap) ReadGob(path string) error {
 			return fmt.Errorf("file %q is empty", path)
 		}
 		return fmt.Errorf("cannot decode object from file %q: %w", path, err)
+	}
+	if !t.state.migrated {
+		migrateAddresses(&t.state)
+		t.state.migrated = true
 	}
 	return nil
 }
@@ -190,4 +216,35 @@ func (t *NetMap) WriteGob(path string) error {
 		return fmt.Errorf("cannot rename temporary file to %q: %w", path, err)
 	}
 	return nil
+}
+
+func migrateAddresses(state *NetMapState) {
+	// migrate map keys
+	newMap := make(NodeAddressMap, len(state.Nodes))
+	for key, val := range state.Nodes {
+		newMap[migrateAddress(key)] = val
+	}
+	state.Nodes = newMap
+	// migrate NewNodes
+	newNodes := make([]string, 0, len(state.NewNodes))
+	for _, val := range state.NewNodes {
+		newNodes = append(newNodes, migrateAddress(val))
+	}
+	state.NewNodes = newNodes
+	// migrate SeedNodes
+	seedNodes := make([]string, 0, len(state.NewNodes))
+	for _, val := range state.SeedNodes {
+		seedNodes = append(seedNodes, migrateAddress(val))
+	}
+	state.SeedNodes = seedNodes
+}
+
+func migrateAddress(key string) string {
+	// convert from "ip/port" to net.Dial format
+	if strings.Contains(key, "/") {
+		elems := strings.Split(key, "/")
+		ip, port := elems[0], elems[1]
+		return net.JoinHostPort(ip, port)
+	}
+	return key
 }
