@@ -18,7 +18,8 @@ import (
 
 const GobFilePath = "netmap.gob"
 
-const ExpiryTime = time.Duration(2 * 24 * time.Hour)
+// Keep nodes in the map for 5 days before expiry
+const ExpiryTime = time.Duration(5 * 24 * time.Hour)
 
 const DogeNetConnections = 4
 const CoreNodeListeners = 4
