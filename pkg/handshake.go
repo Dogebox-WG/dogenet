@@ -20,6 +20,9 @@ const GobFilePath = "netmap.gob"
 
 const ExpiryTime = time.Duration(2 * 24 * time.Hour)
 
+const DogeNetConnections = 4
+const CoreNodeListeners = 4
+
 var Map NetMap // persistent network map
 
 // Current Core Node version
@@ -84,16 +87,24 @@ func RunService(localNode string) {
 			log.Println("Invalid ip address on command line:", localNode)
 			os.Exit(1)
 		}
-		local := NewCollector(wg, net.JoinHostPort(localNode, "22556"), 0)
+		local := NewCollector(wg, net.JoinHostPort(localNode, "22556"), 0, true)
 		services = append(services, local)
 	}
 
-	// start connecting to remote nodes.
-	crawler := NewCollector(wg, "", 5*time.Minute)
-	services = append(services, crawler)
+	// stay connected to DogeNet nodes.
+	// for n := 0; n < DogeNetConnections; n++ {
+	// 	crawler := NewDogeNet(wg)
+	// 	services = append(services, crawler)
+	// }
+
+	// start connecting to Core Nodes.
+	for n := 0; n < CoreNodeListeners; n++ {
+		crawler := NewCollector(wg, "", 5*time.Minute, false)
+		services = append(services, crawler)
+	}
 
 	// start the web server.
-	webserver := NewWebAPI(wg, "0.0.0.0", 8086)
+	webserver := NewWebAPI(wg, "localhost", 8086)
 	services = append(services, webserver)
 
 	// Set up signal handling.
@@ -145,6 +156,7 @@ func NewMapSaver(wg *sync.WaitGroup) Service {
 				wg.Done()
 				return
 			}
+			Map.Trim()
 			m1, q1 := Map.Stats()
 			if m1 != m0 || q1 != q0 { // has changed?
 				m.saveNetworkMap()
@@ -170,7 +182,7 @@ func (m *MapSaver) saveNetworkMap() {
 type Collector struct {
 	cancel  context.CancelFunc
 	conn    net.Conn
-	address string
+	Address string
 }
 
 func (c *Collector) Stop() {
@@ -181,14 +193,14 @@ func (c *Collector) Stop() {
 	}
 }
 
-func NewCollector(wg *sync.WaitGroup, fromAddr string, maxTime time.Duration) Service {
+func NewCollector(wg *sync.WaitGroup, fromAddr string, maxTime time.Duration, isLocal bool) *Collector {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Collector{cancel: cancel, address: fromAddr}
+	c := &Collector{cancel: cancel, Address: fromAddr}
 	wg.Add(1)
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[%v] error: %v", c.address, err)
+				log.Printf("[%v] error: %v", c.Address, err)
 			}
 		}()
 		for {
@@ -197,9 +209,9 @@ func NewCollector(wg *sync.WaitGroup, fromAddr string, maxTime time.Duration) Se
 			if remoteNode == "" {
 				remoteNode = Map.ChooseNode()
 			}
-			c.address = remoteNode // for recover
+			c.Address = remoteNode // for recover
 			// collect addresses from the node until the timeout
-			c.collectAddresses(ctx, remoteNode, maxTime)
+			c.collectAddresses(ctx, remoteNode, maxTime, isLocal)
 			// avoid spamming on connect errors
 			if sleep(ctx, 10*time.Second) {
 				// context was cancelled
@@ -211,7 +223,7 @@ func NewCollector(wg *sync.WaitGroup, fromAddr string, maxTime time.Duration) Se
 	return c
 }
 
-func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTime time.Duration) {
+func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTime time.Duration, isLocal bool) {
 	who := nodeAddr
 	fmt.Printf("[%s] Connecting to node: %s\n", who, nodeAddr)
 
@@ -225,9 +237,9 @@ func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTi
 	c.conn = conn // for shutdown
 
 	// set a time limit on waiting for addresses per node
-	if maxTime != 0 {
-		conn.SetReadDeadline(time.Now().Add(maxTime))
-	}
+	// if maxTime != 0 {
+	// 	conn.SetReadDeadline(time.Now().Add(maxTime))
+	// }
 	reader := bufio.NewReader(conn)
 
 	// send our 'version' message
@@ -259,6 +271,11 @@ func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTi
 		fmt.Printf("[%s] Sent 'verack'\n", who)
 	}
 
+	// successful connection: update the node's timestamp.
+	if !isLocal {
+		Map.UpdateTime(nodeAddr)
+	}
+
 	addresses := 0
 	for {
 		cmd, payload, err := msg.ReadMessage(reader)
@@ -273,8 +290,8 @@ func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTi
 			sendPong(conn, payload, who) // keep-alive
 
 			// request a big list of known addresses (addr response)
-			sendGetAddr(conn, who)
-			fmt.Printf("[%s] Sent getaddr.\n", who)
+			// sendGetAddr(conn, who)
+			// fmt.Printf("[%s] Sent getaddr.\n", who)
 
 		case "reject":
 			re := msg.DecodeReject(payload)
@@ -295,11 +312,11 @@ func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTi
 			mapSize, newLen := Map.Stats()
 			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in map\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), mapSize)
 			addresses += len(addr.AddrList)
-			if addresses >= 1000 && maxTime != 0 {
-				// done: try the next node (not if local node, i.e. maxTime=0)
-				conn.Close()
-				return
-			}
+			// if addresses >= 1000 && maxTime != 0 {
+			// 	// done: try the next node (not if local node, i.e. maxTime=0)
+			// 	conn.Close()
+			// 	return
+			// }
 
 		default:
 			//fmt.Printf("Command '%s' payload: %s\n", cmd, hex.EncodeToString(payload))

@@ -4,12 +4,14 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dogeorg/dogenet/pkg/msg"
 	"github.com/dogeorg/dogenet/pkg/seeds"
@@ -64,6 +66,23 @@ func (t *NetMap) Payload() (res []Payload) {
 	return
 }
 
+func (t *NetMap) Trim() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// remove expired nodes from the map
+	minKeep := time.Now().Add(-ExpiryTime).Unix()
+	oldSize := len(Map.state.Nodes)
+	newMap := make(NodeAddressMap, oldSize)
+	for key, val := range Map.state.Nodes {
+		if int64(val.Time) >= minKeep {
+			newMap[key] = val
+		}
+	}
+	Map.state.Nodes = newMap
+	newSize := len(newMap)
+	fmt.Printf("Trim expired nodes: %d expired, %d in Map\n", oldSize-newSize, newSize)
+}
+
 func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services msg.LocalNodeServices) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -78,6 +97,19 @@ func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services msg.
 	}
 	if !found {
 		Map.state.NewNodes = append(Map.state.NewNodes, key)
+	}
+}
+
+func (t *NetMap) UpdateTime(address string) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		log.Printf("[UpdateTime] Cannot parse address: %v\n", address)
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if node, found := Map.state.Nodes[host]; found {
+		node.Time = uint32(time.Now().Unix())
 	}
 }
 
