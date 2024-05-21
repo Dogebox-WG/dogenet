@@ -22,7 +22,7 @@ const GobFilePath = "netmap.gob"
 const ExpiryTime = time.Duration(5 * 24 * time.Hour)
 
 const DogeNetConnections = 4
-const CoreNodeListeners = 4
+const CoreNodeListeners = 2
 
 var Map NetMap // persistent network map
 
@@ -290,9 +290,9 @@ func (c *Collector) collectAddresses(ctx context.Context, nodeAddr string, maxTi
 			fmt.Printf("[%s] Ping received.\n", who)
 			sendPong(conn, payload, who) // keep-alive
 
-			// request a big list of known addresses (addr response)
-			// sendGetAddr(conn, who)
-			// fmt.Printf("[%s] Sent getaddr.\n", who)
+			// request a list of known addresses (seed nodes)
+			sendGetAddr(conn, who)
+			fmt.Printf("[%s] Sent getaddr.\n", who)
 
 		case "reject":
 			re := msg.DecodeReject(payload)
