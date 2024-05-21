@@ -1,16 +1,18 @@
 package main
 
 import (
+	"log"
 	"os"
 
 	dogenet "github.com/dogeorg/dogenet/pkg"
 )
 
 func main() {
-	// optional IP address of local node.
-	localNode := ""
-	if len(os.Args) > 1 {
-		localNode = os.Args[1]
+	// required IP address of local node.
+	// core node addresses are discovered via the local node.
+	if len(os.Args) < 2 {
+		log.Printf("usage: dogenet <local-core-node-ip>")
 	}
-	dogenet.RunService(localNode)
+	localNode := os.Args[1]
+	dogenet.DogeNet(localNode)
 }

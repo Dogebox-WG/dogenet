@@ -13,6 +13,5 @@
             "args": ["127.0.0.1"],
             "cwd": "${workspaceFolder}"
         }
-
     ]
 }

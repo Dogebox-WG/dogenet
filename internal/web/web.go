@@ -1,4 +1,4 @@
-package dogenet
+package web
 
 import (
 	"context"
@@ -8,43 +8,51 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"sync"
+	"time"
+
+	"github.com/dogeorg/dogenet/internal/governor"
+	"github.com/dogeorg/dogenet/internal/spec"
 )
 
-type WebAPI struct {
-	srv http.Server
-}
-
-func (w *WebAPI) Stop() {
-	w.srv.Shutdown(context.Background())
-}
-
-func NewWebAPI(wg *sync.WaitGroup, bind string, port int) Service {
+func New(store spec.Store, bind string, port int) governor.Service {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/nodes", getNodes)
-	w := &WebAPI{
+	a := &WebAPI{
+		store: store,
 		srv: http.Server{
 			Addr:    net.JoinHostPort(bind, strconv.Itoa(port)),
 			Handler: mux,
 		},
 	}
-	wg.Add(1)
-	go w.Run(wg)
-	return w
+	mux.HandleFunc("/nodes", a.getNodes)
+	return a
 }
 
-func (w *WebAPI) Run(wg *sync.WaitGroup) {
-	log.Printf("HTTP server listening on: %v\n", w.srv.Addr)
-	if err := w.srv.ListenAndServe(); err != http.ErrServerClosed {
+type WebAPI struct {
+	governor.ServiceCtx
+	store spec.Store
+	srv   http.Server
+}
+
+func (a *WebAPI) Stop() {
+	// new goroutine because Shutdown() blocks
+	go func() {
+		// cannot use ServiceCtx here because it's already cancelled
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		a.srv.Shutdown(ctx) // blocking call
+		cancel()
+	}()
+}
+
+func (a *WebAPI) Run() {
+	log.Printf("HTTP server listening on: %v\n", a.srv.Addr)
+	if err := a.srv.ListenAndServe(); err != http.ErrServerClosed { // blocking call
 		log.Printf("HTTP server: %v\n", err)
 	}
-	log.Printf("HTTP server stopped.\n")
-	wg.Done()
 }
 
-func getNodes(w http.ResponseWriter, r *http.Request) {
+func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		bytes, err := json.Marshal(Map.Payload())
+		bytes, err := json.Marshal(a.store.Payload())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error encoding JSON: %s", err.Error()), http.StatusInternalServerError)
 			return

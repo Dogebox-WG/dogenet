@@ -1,5 +1,7 @@
 package msg
 
+import "github.com/dogeorg/dogenet/internal/codec"
+
 type RejectCode int
 
 const (
@@ -44,10 +46,10 @@ func (m *RejectMsg) CodeName() string {
 }
 
 func DecodeReject(msg []byte) (rej RejectMsg) {
-	d := Decode(msg)
-	rej.Message = d.var_string()
-	rej.Code = RejectCode(d.uint8())
-	rej.Reason = d.var_string()
-	rej.Data = d.buf[d.pos:]
+	d := codec.Decode(msg)
+	rej.Message = d.VarString()
+	rej.Code = RejectCode(d.UInt8())
+	rej.Reason = d.VarString()
+	rej.Data = d.Rest()
 	return
 }

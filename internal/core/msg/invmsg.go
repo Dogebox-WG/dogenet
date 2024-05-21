@@ -3,6 +3,8 @@ package msg
 import (
 	"encoding/hex"
 	"fmt"
+
+	"github.com/dogeorg/dogenet/internal/codec"
 )
 
 type InvType uint32
@@ -23,25 +25,25 @@ type InvMsg struct {
 }
 
 func DecodeInvMsg(payload []byte) (msg InvMsg) {
-	d := Decode(payload)
-	count := d.var_uint()
+	d := codec.Decode(payload)
+	count := d.VarUInt()
 	for i := uint64(0); i < count; i++ {
 		var inv InvVector
-		inv.Type = InvType(d.uint32le())
-		inv.Hash = d.bytes(32)
+		inv.Type = InvType(d.UInt32le())
+		inv.Hash = d.Bytes(32)
 		msg.InvList = append(msg.InvList, inv)
 	}
 	return
 }
 
 func EncodeInvMsg(msg InvMsg) []byte {
-	e := Encode(5 + 36*len(msg.InvList))
-	e.var_uint(uint64(len(msg.InvList)))
+	e := codec.Encode(5 + 36*len(msg.InvList))
+	e.VarUInt(uint64(len(msg.InvList)))
 	for _, inv := range msg.InvList {
-		e.uint32le(uint32(inv.Type))
-		e.bytes(inv.Hash)
+		e.UInt32le(uint32(inv.Type))
+		e.Bytes(inv.Hash)
 	}
-	return e.buf
+	return e.Result()
 }
 
 type InvVector struct {
@@ -54,17 +56,17 @@ func (i *InvVector) String() string {
 }
 
 func DecodeInvVector(payload []byte) (msg InvVector) {
-	d := Decode(payload)
-	msg.Type = InvType(d.uint32le())
-	msg.Hash = d.bytes(32)
+	d := codec.Decode(payload)
+	msg.Type = InvType(d.UInt32le())
+	msg.Hash = d.Bytes(32)
 	return
 }
 
 func EncodeInvVector(msg InvVector) []byte {
-	e := Encode(36)
-	e.uint32le(uint32(msg.Type))
-	e.bytes(msg.Hash)
-	return e.buf
+	e := codec.Encode(36)
+	e.UInt32le(uint32(msg.Type))
+	e.Bytes(msg.Hash)
+	return e.Result()
 }
 
 func InvTypeString(t InvType) string {

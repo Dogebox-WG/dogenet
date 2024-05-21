@@ -1,9 +1,11 @@
 package msg
 
+import "github.com/dogeorg/dogenet/internal/codec"
+
 // NetAddr represents the structure of a network address
 type NetAddr struct {
 	Time     uint32 // if version >= 31402; not present in version message
-	Services LocalNodeServices
+	Services uint64 // Services bit flags
 	Address  []byte // [16] network byte order (BE); IPv4-mapped IPv6 address
 	Port     uint16 // network byte order (BE)
 }
@@ -11,23 +13,22 @@ type NetAddr struct {
 const AddrTimeVersion = 31402 // Time field added to NetAddr.
 
 // NB. pass version=0 in Version message.
-func DecodeNetAddr(d *Decoder, version int32) (a NetAddr) {
+func DecodeNetAddr(d *codec.Decoder, version int32) (a NetAddr) {
 	if version >= AddrTimeVersion {
-		a.Time = d.uint32le()
+		a.Time = d.UInt32le()
 	}
-	a.Services = LocalNodeServices(d.uint64le())
-	a.Address = d.bytes(16)
-	a.Port = d.uint16be()
+	a.Services = d.UInt64le()
+	a.Address = d.Bytes(16)
+	a.Port = d.UInt16be()
 	return
 }
 
 // NB. pass version=0 in Version message.
-func EncodeNetAddr(a NetAddr, e *Encoder, version int32) {
+func EncodeNetAddr(a NetAddr, e *codec.Encoder, version int32) {
 	if version >= AddrTimeVersion {
-		e.uint32le(a.Time)
+		e.UInt32le(a.Time)
 	}
-	e.uint64le(uint64(a.Services))
-	e.bytes(a.Address)
-	e.uint16be(a.Port)
-	return
+	e.UInt64le(uint64(a.Services))
+	e.Bytes(a.Address)
+	e.UInt16be(a.Port)
 }

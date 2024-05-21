@@ -1,21 +1,21 @@
 package msg
 
-type LocalNodeServices uint64
+import "github.com/dogeorg/dogenet/internal/codec"
 
-// LocalNodeServices bit flags:
+// Services bit flags:
 const (
-	NodeNetwork        LocalNodeServices = 1    // This node can be asked for full blocks instead of just headers.
-	NodeGetUTXO        LocalNodeServices = 2    // See BIP 0064
-	NodeBloom          LocalNodeServices = 4    // See BIP 0111
-	NodeWitness        LocalNodeServices = 8    // See BIP 0144
-	NodeCompactFilters LocalNodeServices = 64   // See BIP 0157
-	NodeNetworkLimited LocalNodeServices = 1024 // See BIP 0159
+	NodeNetwork        = 1    // This node can be asked for full blocks instead of just headers.
+	NodeGetUTXO        = 2    // See BIP 0064
+	NodeBloom          = 4    // See BIP 0111
+	NodeWitness        = 8    // See BIP 0144
+	NodeCompactFilters = 64   // See BIP 0157
+	NodeNetworkLimited = 1024 // See BIP 0159
 )
 
 // VersionMsg represents the structure of the version message
 type VersionMsg struct {
-	Version    int32 // PROTOCOL_VERSION
-	Services   LocalNodeServices
+	Version    int32   // PROTOCOL_VERSION
+	Services   uint64  // Services bit flags
 	Timestamp  int64   // nTime: UNIX time in seconds
 	RemoteAddr NetAddr // addrYou: network address of the node receiving this message
 	// version ≥ 106
@@ -28,24 +28,24 @@ type VersionMsg struct {
 }
 
 func DecodeVersion(payload []byte) (v VersionMsg) {
-	d := Decode(payload)
-	v.Version = int32(d.uint32le())
+	d := codec.Decode(payload)
+	v.Version = int32(d.UInt32le())
 	if v.Version == 10300 {
 		// a fixup found in dogecoin-seeder
 		v.Version = 300
 	}
-	v.Services = LocalNodeServices(d.uint64le())
-	v.Timestamp = int64(d.uint64le())
+	v.Services = d.UInt64le()
+	v.Timestamp = int64(d.UInt64le())
 	v.RemoteAddr = DecodeNetAddr(d, 0)
 	if v.Version >= 106 {
 		v.LocalAddr = DecodeNetAddr(d, 0)
-		v.Nonce = d.uint64le()
-		v.Agent = d.var_string()
+		v.Nonce = d.UInt64le()
+		v.Agent = d.VarString()
 		if v.Version >= 209 {
-			v.Height = int32(d.uint32le())
+			v.Height = int32(d.UInt32le())
 			// some peers send version >= 70001 but don't send Relay.
-			if v.Version >= 70001 && d.has(1) {
-				v.Relay = d.bool()
+			if v.Version >= 70001 && d.Has(1) {
+				v.Relay = d.Bool()
 			}
 		}
 	}
@@ -53,19 +53,19 @@ func DecodeVersion(payload []byte) (v VersionMsg) {
 }
 
 func EncodeVersion(version VersionMsg) []byte {
-	e := Encode(86)
-	e.uint32le(uint32(version.Version))
-	e.uint64le(uint64(version.Services))
-	e.uint64le(uint64(version.Timestamp))
+	e := codec.Encode(86)
+	e.UInt32le(uint32(version.Version))
+	e.UInt64le(uint64(version.Services))
+	e.UInt64le(uint64(version.Timestamp))
 	EncodeNetAddr(version.RemoteAddr, e, 0)
 	if version.Version >= 106 {
 		EncodeNetAddr(version.LocalAddr, e, 0)
-		e.uint64le(version.Nonce)
-		e.var_string(version.Agent)
-		e.uint32le(uint32(version.Height))
+		e.UInt64le(version.Nonce)
+		e.VarString(version.Agent)
+		e.UInt32le(uint32(version.Height))
 		if version.Version >= 70001 {
-			e.bool(version.Relay)
+			e.Bool(version.Relay)
 		}
 	}
-	return e.buf
+	return e.Result()
 }

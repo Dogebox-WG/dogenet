@@ -1,5 +1,7 @@
 package msg
 
+import "github.com/dogeorg/dogenet/internal/codec"
+
 type GetHeadersMsg struct {
 	Version            uint32   // the protocol version
 	BlockLocatorHashes [][]byte // [][32] block locator object; newest back to genesis block (dense to start, but then sparse)
@@ -7,23 +9,23 @@ type GetHeadersMsg struct {
 }
 
 func DecodeGetHeaders(payload []byte) (msg GetHeadersMsg) {
-	d := Decode(payload)
-	msg.Version = d.uint32le()
-	hashCount := d.var_uint()
+	d := codec.Decode(payload)
+	msg.Version = d.UInt32le()
+	hashCount := d.VarUInt()
 	for i := uint64(0); i < hashCount; i++ {
-		msg.BlockLocatorHashes = append(msg.BlockLocatorHashes, d.bytes(32))
+		msg.BlockLocatorHashes = append(msg.BlockLocatorHashes, d.Bytes(32))
 	}
-	msg.HashStop = d.bytes(32)
+	msg.HashStop = d.Bytes(32)
 	return
 }
 
 func EncodeGetHeaders(msg GetHeadersMsg) []byte {
-	e := Encode(4 + 5 + 32 + 32*len(msg.BlockLocatorHashes))
-	e.uint32le(msg.Version)
-	e.var_uint(uint64(len(msg.BlockLocatorHashes)))
+	e := codec.Encode(4 + 5 + 32 + 32*len(msg.BlockLocatorHashes))
+	e.UInt32le(msg.Version)
+	e.VarUInt(uint64(len(msg.BlockLocatorHashes)))
 	for _, hash := range msg.BlockLocatorHashes {
-		e.bytes(hash)
+		e.Bytes(hash)
 	}
-	e.bytes(msg.HashStop)
-	return e.buf
+	e.Bytes(msg.HashStop)
+	return e.Result()
 }

@@ -13,14 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dogeorg/dogenet/pkg/msg"
-	"github.com/dogeorg/dogenet/pkg/seeds"
+	"github.com/dogeorg/dogenet/internal/core/seeds"
+	"github.com/dogeorg/dogenet/internal/spec"
 )
 
 type NodeAddressMap map[string]NodeInfo
 type NodeInfo struct {
 	Time     uint32
-	Services msg.LocalNodeServices
+	Services uint64
 }
 
 type NetMapState struct {
@@ -46,18 +46,12 @@ func (t *NetMap) Stats() (mapSize int, newNodes int) {
 	return len(t.state.Nodes), len(t.state.NewNodes)
 }
 
-type Payload struct {
-	Address  string                `json:"address"`
-	Time     uint32                `json:"time"`
-	Services msg.LocalNodeServices `json:"services"`
-}
-
-func (t *NetMap) Payload() (res []Payload) {
+func (t *NetMap) Payload() (res []spec.Payload) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	res = make([]Payload, 0, len(Map.state.Nodes))
+	res = make([]spec.Payload, 0, len(Map.state.Nodes))
 	for key, val := range Map.state.Nodes {
-		res = append(res, Payload{
+		res = append(res, spec.Payload{
 			Address:  key,
 			Time:     val.Time,
 			Services: val.Services,
@@ -70,7 +64,7 @@ func (t *NetMap) Trim() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// remove expired nodes from the map
-	minKeep := time.Now().Add(-ExpiryTime).Unix()
+	minKeep := time.Now().Add(-spec.ExpiryTime).Unix()
 	oldSize := len(Map.state.Nodes)
 	newMap := make(NodeAddressMap, oldSize)
 	for key, val := range Map.state.Nodes {
@@ -83,7 +77,7 @@ func (t *NetMap) Trim() {
 	fmt.Printf("Trim expired nodes: %d expired, %d in Map\n", oldSize-newSize, newSize)
 }
 
-func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services msg.LocalNodeServices) {
+func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := net.JoinHostPort(address.String(), strconv.Itoa(int(port)))
