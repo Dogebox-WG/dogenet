@@ -68,6 +68,11 @@ func (d *Decoder) UInt64le() uint64 {
 	return binary.LittleEndian.Uint64(d.buf[p : p+8])
 }
 
+func (d *Decoder) Int64le() int64 {
+	p := d.pos
+	d.pos += 8
+	return int64(binary.LittleEndian.Uint64(d.buf[p : p+8]))
+}
 func (d *Decoder) VarUInt() uint64 {
 	val := d.buf[d.pos]
 	d.pos += 1

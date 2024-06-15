@@ -49,6 +49,10 @@ func (e *Encoder) UInt64le(v uint64) {
 	e.buf = binary.LittleEndian.AppendUint64(e.buf, v)
 }
 
+func (e *Encoder) Int64le(v int64) {
+	e.buf = binary.LittleEndian.AppendUint64(e.buf, uint64(v))
+}
+
 func (e *Encoder) VarUInt(val uint64) {
 	if val < 0xFD {
 		e.buf = append(e.buf, byte(val))
