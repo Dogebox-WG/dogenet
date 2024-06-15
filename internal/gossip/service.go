@@ -1,36 +1,56 @@
 package gossip
 
 import (
+	"bufio"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/dogeorg/dogenet/internal/gossip/protocol"
 	"github.com/dogeorg/dogenet/internal/governor"
+	"github.com/dogeorg/dogenet/internal/spec"
 )
 
 type netService struct {
 	governor.ServiceCtx
-	address     string
+	address     spec.Address
 	mutex       sync.Mutex
 	listner     net.Listener
+	privKey     protocol.PrivKey
+	remotePort  uint16
 	connections map[net.Conn]struct{}
 }
 
-func New(address string) governor.Service {
+func New(address spec.Address, remotePort uint16) governor.Service {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(fmt.Sprintf("cannot generate pubkey: %v", err))
+	}
+	if remotePort == 0 {
+		remotePort = spec.DogeNetDefaultPort
+	}
 	return &netService{
 		address:     address,
 		connections: make(map[net.Conn]struct{}),
+		privKey:     priv,
+		remotePort:  remotePort,
 	}
 }
 
 func (ns *netService) Run() {
 	var lc net.ListenConfig
-	listner, err := lc.Listen(ns.Context, "tcp", ns.address)
+	who := ns.address.String()
+	listner, err := lc.Listen(ns.Context, "tcp", ns.address.String())
 	if err != nil {
-		log.Printf("[%s] cannot listen on `%v`: %v", ns.ServiceName, ns.address, err)
+		log.Printf("[%s] cannot listen on `%v`: %v", ns.ServiceName, who, err)
 		return
 	}
-	log.Printf("[%s] listening on %v", ns.ServiceName, ns.address)
+	log.Printf("[%s] listening on %v", ns.ServiceName, who)
 	ns.mutex.Lock()
 	ns.listner = listner
 	ns.mutex.Unlock()
@@ -38,7 +58,7 @@ func (ns *netService) Run() {
 	for {
 		conn, err := listner.Accept()
 		if err != nil {
-			log.Printf("[%s] accept failed on `%v`: %v", ns.ServiceName, ns.address, err)
+			log.Printf("[%s] accept failed on `%v`: %v", ns.ServiceName, who, err)
 			return // typically due to Stop()
 		}
 		if ns.trackConn(conn, true) {
@@ -81,5 +101,44 @@ func (ns *netService) trackConn(c net.Conn, add bool) bool {
 }
 
 func (ns *netService) inboundConnection(conn net.Conn) {
-	conn.Write([]byte("hello"))
+	// receive messages from peer
+	who := ns.address.String()
+	reader := bufio.NewReader(conn)
+	ns.sendMyAddress(conn)
+	for {
+		tag, msg, _, err := protocol.ReadMessage(reader)
+		if err != nil {
+			log.Printf("bad message: %v", err)
+			return // close connection
+		}
+		switch tag {
+
+		case protocol.TagReject:
+			rej := protocol.DecodeReject(msg)
+			if rej.Code == protocol.REJECT_TAG {
+				fmt.Printf("[%s] Reject tag: %s %s\n", who, string(rej.Data), rej.Reason)
+			} else {
+				fmt.Printf("[%s] Reject: %s %s %s\n", who, rej.CodeName(), rej.Reason, hex.EncodeToString(rej.Data))
+			}
+
+		default:
+			_, err := conn.Write(
+				protocol.EncodeMessage(protocol.TagReject, ns.privKey,
+					protocol.EncodeReject(protocol.REJECT_TAG, "not supported", protocol.TagToBytes(tag))))
+			if err != nil {
+				log.Printf("failed to send message")
+				return // drop connection
+			}
+		}
+	}
+}
+
+func (ns *netService) sendMyAddress(conn net.Conn) {
+	addr := protocol.AddressMsg{
+		Time:     time.Now().Unix(),
+		Services: 1,
+		Address:  ns.address.Host.To16(), // can be nil
+		Port:     ns.address.Port,
+	}
+	conn.Write(protocol.EncodeMessage(protocol.AddrTag, ns.privKey, protocol.EncodeAddrMsg(addr)))
 }

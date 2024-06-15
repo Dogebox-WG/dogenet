@@ -1,4 +1,4 @@
 package spec
 
 // The public port number our Gossip service listens on
-const DogeNetDefaultPort = 8088
+const DogeNetDefaultPort uint16 = 8095
