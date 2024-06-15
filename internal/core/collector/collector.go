@@ -3,7 +3,9 @@ package collector
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +23,7 @@ const MinimumBlockHeight = 700000
 // Our DogeMap Node services
 const DogeMapServices = 0
 
-func New(store spec.Store, fromAddr string, maxTime time.Duration, isLocal bool) *Collector {
+func New(store spec.Store, fromAddr spec.Address, maxTime time.Duration, isLocal bool) *Collector {
 	c := &Collector{store: store, Address: fromAddr, maxTime: maxTime, isLocal: isLocal}
 	return c
 }
@@ -31,7 +33,7 @@ type Collector struct {
 	store   spec.Store
 	mutex   sync.Mutex
 	conn    net.Conn
-	Address string
+	Address spec.Address
 	maxTime time.Duration
 	isLocal bool
 }
@@ -51,10 +53,13 @@ func (c *Collector) Run() {
 	for {
 		// choose the next node to connect to
 		remoteNode := c.Address
-		if remoteNode == "" {
-			remoteNode = c.store.ChooseNode()
+		for !remoteNode.IsValid() {
+			if remoteNode = c.store.ChooseCoreNode(); remoteNode.IsValid() {
+				break
+			}
+			// none available, wait for local listener to add nodes
+			c.Sleep(5 * time.Second)
 		}
-		c.Address = remoteNode // for recover
 		// collect addresses from the node until the timeout
 		c.collectAddresses(remoteNode)
 		// avoid spamming on connect errors
@@ -65,12 +70,12 @@ func (c *Collector) Run() {
 	}
 }
 
-func (c *Collector) collectAddresses(nodeAddr string) {
-	who := nodeAddr
+func (c *Collector) collectAddresses(nodeAddr spec.Address) {
+	who := nodeAddr.String()
 	fmt.Printf("[%s] Connecting to node: %s\n", who, nodeAddr)
 
 	d := net.Dialer{Timeout: 30 * time.Second}
-	conn, err := d.DialContext(c.Context, "tcp", nodeAddr)
+	conn, err := d.DialContext(c.Context, "tcp", nodeAddr.String())
 	if err != nil {
 		fmt.Printf("[%s] Error connecting to Dogecoin node: %v\n", who, err)
 		return
@@ -82,9 +87,9 @@ func (c *Collector) collectAddresses(nodeAddr string) {
 	c.mutex.Unlock()
 
 	// set a time limit on waiting for addresses per node
-	// if maxTime != 0 {
-	// 	conn.SetReadDeadline(time.Now().Add(maxTime))
-	// }
+	if c.maxTime != 0 {
+		conn.SetReadDeadline(time.Now().Add(c.maxTime))
+	}
 	reader := bufio.NewReader(conn)
 
 	// send our 'version' message
@@ -99,7 +104,7 @@ func (c *Collector) collectAddresses(nodeAddr string) {
 	// expect the version message from the node
 	version, err := expectVersion(reader)
 	if err != nil {
-		fmt.Printf("[%s] %v", who, err)
+		fmt.Printf("[%s] %v\n", who, err)
 		return
 	}
 
@@ -118,7 +123,23 @@ func (c *Collector) collectAddresses(nodeAddr string) {
 
 	// successful connection: update the node's timestamp.
 	if !c.isLocal {
-		c.store.UpdateTime(nodeAddr)
+		c.store.UpdateCoreTime(nodeAddr)
+		// check if agent string contains @net or @net:<port>
+		foundNet := strings.Index(version.Agent, "@net")
+		if foundNet >= 0 {
+			log.Printf("[%s] found @net in node agent string: %v", who, nodeAddr)
+			// check for custom port
+			port := spec.DogeNetDefaultPort
+			if strings.HasPrefix(version.Agent[foundNet+4:], ":") {
+				var newport int
+				_, err := fmt.Sscan(version.Agent[foundNet+5:], &newport)
+				if err == nil && newport >= 0 && newport < 65536 { // only if valid
+					port = uint16(newport)
+				}
+			}
+			// add the doge-net node address
+			c.store.NewNetNode(spec.Address{Host: nodeAddr.Host, Port: port}, time.Now().Unix())
+		}
 	}
 
 	addresses := 0
@@ -144,24 +165,25 @@ func (c *Collector) collectAddresses(nodeAddr string) {
 
 		case "addr":
 			addr := msg.DecodeAddrMsg(payload, nodeVer)
-			_, oldLen := c.store.Stats()
+			_, oldLen := c.store.CoreStats()
 			kept := 0
 			keepAfter := time.Now().Add(-spec.ExpiryTime).Unix()
 			for _, a := range addr.AddrList {
 				// fmt.Println("• ", net.IP(a.Address), a.Port, "svc", a.Services, "ts", a.Time)
 				if int64(a.Time) >= keepAfter {
-					c.store.AddNode(net.IP(a.Address), a.Port, a.Time, a.Services)
+					c.store.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, int64(a.Time), a.Services, false)
 					kept++
 				}
 			}
-			mapSize, newLen := c.store.Stats()
+			mapSize, newLen := c.store.CoreStats()
 			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in map\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), mapSize)
 			addresses += len(addr.AddrList)
-			// if addresses >= 1000 && maxTime != 0 {
-			// 	// done: try the next node (not if local node, i.e. maxTime=0)
-			// 	conn.Close()
-			// 	return
-			// }
+			if addresses >= 1001 {
+				// done: try the next node (or reconnect to local node)
+				// a node will only respond once to the 'addr' request
+				conn.Close()
+				return
+			}
 
 		default:
 			//fmt.Printf("Command '%s' payload: %s\n", cmd, hex.EncodeToString(payload))
@@ -220,7 +242,7 @@ func sendPong(conn net.Conn, pingPayload []byte, who string) {
 	// reply with 'pong', same payload (nonce)
 	_, err := conn.Write(msg.EncodeMessage("pong", pingPayload))
 	if err != nil {
-		fmt.Printf("[%s] failed to send 'pong': %v", who, err)
+		fmt.Printf("[%s] failed to send 'pong': %v\n", who, err)
 		return
 	}
 }
@@ -228,7 +250,7 @@ func sendPong(conn net.Conn, pingPayload []byte, who string) {
 func sendGetAddr(conn net.Conn, who string) {
 	_, err := conn.Write(msg.EncodeMessage("getaddr", []byte{}))
 	if err != nil {
-		fmt.Printf("[%s] failed to send 'getaddr': %v", who, err)
+		fmt.Printf("[%s] failed to send 'getaddr': %v\n", who, err)
 		return
 	}
 }

@@ -9,12 +9,14 @@ import (
 const ExpiryTime = time.Duration(5 * 24 * time.Hour)
 
 type Store interface {
-	ChooseNode() string
-	UpdateTime(address string)
-	AddNode(address net.IP, port uint16, time uint32, services uint64)
-	Stats() (mapSize int, newNodes int)
-	Trim()
-	Payload() (res []Payload)
+	ChooseCoreNode() string
+	UpdateCoreTime(address string)
+	AddCoreNode(address net.IP, port uint16, time uint32, services uint64)
+	AddNetNode(address string)
+	CoreStats() (mapSize int, newNodes int)
+	NetStats() (mapSize int, newNodes int)
+	TrimNodes()
+	NodeList() (res []Payload)
 }
 
 type Payload struct {

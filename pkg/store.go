@@ -13,44 +13,62 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dogeorg/dogenet/internal/core/seeds"
 	"github.com/dogeorg/dogenet/internal/spec"
 )
 
 type NodeAddressMap map[string]NodeInfo
 type NodeInfo struct {
-	Time     uint32
-	Services uint64
+	Time     uint32 // last time any other node connected to the node address
+	Services uint64 // services from the node's version message
+	IsNet    bool   // true if the node's agent string contains @map (Core nodes only)
+}
+
+type NodeSet struct {
+	Nodes     NodeAddressMap // node address -> timstamp, services
+	Sample    []string       // random sample of known nodes (selected from Nodes)
+	NewNodes  []string       // queue of newly discovered nodes (high priority)
+	SeedNodes []string       // queue of seed nodes e.g. from DNS (lowest priority)
 }
 
 type NetMapState struct {
-	Nodes     NodeAddressMap // node address -> timstamp, services
-	NewNodes  []string       // queue of newly discovered nodes (high priority)
-	SeedNodes []string       // queue of seed nodes (low priority)
-	migrated  bool           // true after migrateAddresses has run
+	Core NodeSet
+	Net  NodeSet
+	// for Gob migration:
+	Nodes     NodeAddressMap // migrate -> Core.Nodes
+	NewNodes  []string       // migrate -> Core.NewNodes
+	SeedNodes []string       // migrate -> Core.SeedNodes
+	migrated  bool           // migrate old address format
 }
 
 type NetMap struct {
-	mu     sync.Mutex
-	state  NetMapState
-	sample []string // a random sample of known nodes (not saved)
+	mu    sync.Mutex
+	state NetMapState // persisted in Gob file
 }
 
 func NewNetMap() NetMap {
-	return NetMap{state: NetMapState{Nodes: make(NodeAddressMap)}}
+	return NetMap{state: NetMapState{
+		Core: NodeSet{Nodes: make(NodeAddressMap)},
+		Net:  NodeSet{Nodes: make(NodeAddressMap)},
+	}}
 }
 
-func (t *NetMap) Stats() (mapSize int, newNodes int) {
+func (t *NetMap) CoreStats() (mapSize int, newNodes int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return len(t.state.Nodes), len(t.state.NewNodes)
+	return len(t.state.Core.Nodes), len(t.state.Core.NewNodes)
 }
 
-func (t *NetMap) Payload() (res []spec.Payload) {
+func (t *NetMap) NetStats() (mapSize int, newNodes int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	res = make([]spec.Payload, 0, len(Map.state.Nodes))
-	for key, val := range Map.state.Nodes {
+	return len(t.state.Net.Nodes), len(t.state.Net.NewNodes)
+}
+
+func (t *NetMap) NodeList() (res []spec.Payload) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	res = make([]spec.Payload, 0, len(Map.state.Core.Nodes))
+	for key, val := range Map.state.Core.Nodes {
 		res = append(res, spec.Payload{
 			Address:  key,
 			Time:     val.Time,
@@ -60,41 +78,48 @@ func (t *NetMap) Payload() (res []spec.Payload) {
 	return
 }
 
-func (t *NetMap) Trim() {
+func (t *NetMap) TrimNodes() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// remove expired nodes from the map
 	minKeep := time.Now().Add(-spec.ExpiryTime).Unix()
-	oldSize := len(Map.state.Nodes)
+	oldSize := len(Map.state.Core.Nodes)
 	newMap := make(NodeAddressMap, oldSize)
-	for key, val := range Map.state.Nodes {
+	for key, val := range Map.state.Core.Nodes {
 		if int64(val.Time) >= minKeep {
 			newMap[key] = val
 		}
 	}
-	Map.state.Nodes = newMap
+	Map.state.Core.Nodes = newMap
 	newSize := len(newMap)
 	fmt.Printf("Trim expired nodes: %d expired, %d in Map\n", oldSize-newSize, newSize)
 }
 
-func (t *NetMap) AddNode(address net.IP, port uint16, time uint32, services uint64) {
+func (t *NetMap) AddCoreNode(address net.IP, port uint16, time uint32, services uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := net.JoinHostPort(address.String(), strconv.Itoa(int(port)))
-	old, found := Map.state.Nodes[key]
+	old, found := Map.state.Core.Nodes[key]
 	if !found || time > old.Time {
 		// insert or replace
-		Map.state.Nodes[key] = NodeInfo{
+		Map.state.Core.Nodes[key] = NodeInfo{
 			Time:     time,
 			Services: services,
 		}
 	}
 	if !found {
-		Map.state.NewNodes = append(Map.state.NewNodes, key)
+		Map.state.Core.NewNodes = append(Map.state.Core.NewNodes, key)
 	}
 }
 
-func (t *NetMap) UpdateTime(address string) {
+func (t *NetMap) AddNetNode(address string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// untrusted and untried new address
+	Map.state.Net.NewNodes = append(Map.state.Net.NewNodes, address)
+}
+
+func (t *NetMap) UpdateCoreTime(address string) {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		log.Printf("[UpdateTime] Cannot parse address: %v\n", address)
@@ -102,53 +127,17 @@ func (t *NetMap) UpdateTime(address string) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if node, found := Map.state.Nodes[host]; found {
+	if node, found := Map.state.Core.Nodes[host]; found {
 		node.Time = uint32(time.Now().Unix())
 	}
 }
 
-func (t *NetMap) AddNewNode(address net.IP, port uint16) {
+func (t *NetMap) ChooseCoreNode() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := net.JoinHostPort(address.String(), strconv.Itoa(int(port)))
-	Map.state.NewNodes = append(Map.state.NewNodes, key)
-}
-
-func (t *NetMap) ChooseNode() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	fmt.Printf("Queue: %d new, %d sampled, %d seeds, %d Map\n", len(t.state.NewNodes), len(t.sample), len(t.state.SeedNodes), len(t.state.Nodes))
-	for {
-		// highest priority: connect to newly discovered nodes.
-		if len(t.state.NewNodes) > 0 {
-			var addr string
-			t.state.NewNodes, addr = pluckRandom(t.state.NewNodes)
-			return addr
-		}
-		// next priority: connect to a random sample of known nodes.
-		if len(t.sample) > 0 {
-			var addr string
-			t.sample, addr = pluckRandom(t.sample)
-			return addr
-		}
-		// generate another sample of known nodes (XXX cull first)
-		fmt.Println("Sampling the network map.")
-		t.sampleNodeMap()
-		if len(t.sample) > 0 {
-			continue
-		}
-		// lowest priority: connect to seed nodes.
-		if len(t.state.SeedNodes) > 0 {
-			var addr string
-			t.state.SeedNodes, addr = pluckRandom(t.state.SeedNodes)
-			return addr
-		}
-		// fetch new seed nodes from DNS.
-		// t.seedFromDNS()
-		if len(t.state.SeedNodes) < 1 {
-			t.seedFromFixed()
-		}
-	}
+	fmt.Printf("Core: %d new, %d sampled, %d known\n", len(t.state.Core.NewNodes), len(t.state.Core.Sample), len(t.state.Core.Nodes))
+	fmt.Printf("DNet: %d new, %d sampled, %d known\n", len(t.state.Net.NewNodes), len(t.state.Net.Sample), len(t.state.Net.Nodes))
+	return chooseNode(&t.state.Core)
 }
 
 func pluckRandom(arr []string) ([]string, string) {
@@ -160,9 +149,8 @@ func pluckRandom(arr []string) ([]string, string) {
 	return arr, val
 }
 
-func (t *NetMap) sampleNodeMap() {
+func sampleNodeMap(nodeMap NodeAddressMap) (coreSample []string) {
 	// choose 100 or so nodes at random from the nodeMap
-	nodeMap := Map.state.Nodes
 	mod := len(nodeMap) / 100
 	if mod < 1 {
 		mod = 1
@@ -171,34 +159,37 @@ func (t *NetMap) sampleNodeMap() {
 	samp := rand.Intn(mod) // initial sample
 	for key := range nodeMap {
 		if idx >= samp {
-			t.sample = append(t.sample, key)
+			coreSample = append(coreSample, key)
 			samp = idx + 1 + rand.Intn(mod) // next sample
 		}
 		idx++
 	}
+	return
 }
 
-func (t *NetMap) seedFromDNS() {
-	for _, node := range seeds.DNSSeeds {
-		ips, err := net.LookupIP(node)
-		if err != nil {
-			fmt.Println("Error resolving DNS:", node, ":", err)
-			continue
-		}
-		for _, ip := range ips {
-			key := net.JoinHostPort(ip.String(), "22556")
-			t.state.SeedNodes = append(t.state.SeedNodes, key)
-			fmt.Println("Seed from DNS:", key)
-		}
+func chooseNode(nodeSet *NodeSet) string {
+	// highest priority: connect to newly discovered nodes.
+	if len(nodeSet.NewNodes) > 0 {
+		var addr string
+		nodeSet.NewNodes, addr = pluckRandom(nodeSet.NewNodes)
+		return addr
 	}
-}
-
-func (t *NetMap) seedFromFixed() {
-	for _, seed := range seeds.FixedSeeds {
-		key := net.JoinHostPort(net.IP(seed.Host).String(), strconv.Itoa(seed.Port))
-		t.state.SeedNodes = append(t.state.SeedNodes, key)
-		fmt.Println("Seed from Fixture:", key)
+	// next priority: connect to a random sample of known nodes.
+	if len(nodeSet.Sample) > 0 {
+		var addr string
+		nodeSet.Sample, addr = pluckRandom(nodeSet.Sample)
+		return addr
 	}
+	// generate another sample of known nodes (XXX cull first)
+	fmt.Println("Sampling the network map.")
+	nodeSet.Sample = sampleNodeMap(nodeSet.Nodes)
+	if len(nodeSet.Sample) > 0 {
+		var addr string
+		nodeSet.Sample, addr = pluckRandom(nodeSet.Sample)
+		return addr
+	}
+	// no nodes available
+	return ""
 }
 
 func (t *NetMap) ReadGob(path string) error {
@@ -216,9 +207,19 @@ func (t *NetMap) ReadGob(path string) error {
 		}
 		return fmt.Errorf("cannot decode object from file %q: %w", path, err)
 	}
+	// migrate from old address format
 	if !t.state.migrated {
 		migrateAddresses(&t.state)
 		t.state.migrated = true
+	}
+	// migrate from core-only format
+	if t.state.Nodes != nil {
+		t.state.Core.Nodes = t.state.Nodes
+		t.state.Nodes = nil
+	}
+	if t.state.NewNodes != nil {
+		t.state.Core.NewNodes = t.state.NewNodes
+		t.state.NewNodes = nil
 	}
 	return nil
 }
@@ -246,23 +247,21 @@ func (t *NetMap) WriteGob(path string) error {
 
 func migrateAddresses(state *NetMapState) {
 	// migrate map keys
-	newMap := make(NodeAddressMap, len(state.Nodes))
-	for key, val := range state.Nodes {
-		newMap[migrateAddress(key)] = val
+	if state.Nodes != nil {
+		newMap := make(NodeAddressMap, len(state.Nodes))
+		for key, val := range state.Nodes {
+			newMap[migrateAddress(key)] = val
+		}
+		state.Nodes = newMap
 	}
-	state.Nodes = newMap
 	// migrate NewNodes
-	newNodes := make([]string, 0, len(state.NewNodes))
-	for _, val := range state.NewNodes {
-		newNodes = append(newNodes, migrateAddress(val))
+	if state.NewNodes != nil {
+		newNodes := make([]string, 0, len(state.NewNodes))
+		for _, val := range state.NewNodes {
+			newNodes = append(newNodes, migrateAddress(val))
+		}
+		state.NewNodes = newNodes
 	}
-	state.NewNodes = newNodes
-	// migrate SeedNodes
-	seedNodes := make([]string, 0, len(state.NewNodes))
-	for _, val := range state.SeedNodes {
-		seedNodes = append(seedNodes, migrateAddress(val))
-	}
-	state.SeedNodes = seedNodes
 }
 
 func migrateAddress(key string) string {

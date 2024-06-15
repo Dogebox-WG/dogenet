@@ -6,17 +6,20 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/dogeorg/dogenet/internal/core/collector"
+	"github.com/dogeorg/dogenet/internal/gossip"
 	"github.com/dogeorg/dogenet/internal/governor"
+	"github.com/dogeorg/dogenet/internal/spec"
 	"github.com/dogeorg/dogenet/internal/web"
 )
 
 const GobFilePath = "netmap.gob"
 
 const DogeNetConnections = 4
-const CoreNodeListeners = 0
+const CoreNodeListeners = 1
 
 var Map NetMap // persistent network map
 
@@ -33,6 +36,9 @@ func DogeNet(localNode string) {
 
 	// periodically save the network map.
 	gov.Add("map-saver", NewMapSaver())
+
+	// start the gossip server
+	gov.Add("gossip", gossip.New(net.JoinHostPort("0.0.0.0", strconv.Itoa(spec.DogeNetDefaultPort))))
 
 	// stay connected to local node if specified.
 	if localNode != "" {
@@ -76,14 +82,14 @@ func NewMapSaver() governor.Service {
 }
 
 func (m *MapSaver) Run() {
-	m0, q0 := Map.Stats()
+	m0, q0 := Map.CoreStats()
 	for {
 		// save the map every 5 minutes, if modified
 		if m.Sleep(5 * time.Minute) {
 			return
 		}
-		Map.Trim()
-		m1, q1 := Map.Stats()
+		Map.TrimNodes()
+		m1, q1 := Map.CoreStats()
 		if m1 != m0 || q1 != q0 { // has changed?
 			m.saveNetworkMap()
 			m0 = m1

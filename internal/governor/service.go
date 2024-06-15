@@ -70,19 +70,14 @@ func (s *ServiceCtx) initServiceContextFromGovernor(ctx context.Context, name st
 // Stopping returns true if the servce has been asked to stop:
 // caller should exit the goroutine.
 func (s *ServiceCtx) Stopping() bool {
-	select {
-	case <-s.Context.Done():
-		return true
-	default:
-		return false
-	}
+	return s.Context.Err() != nil // Canceled or DeadlineExceeded
 }
 
 // Sleep returns true if it was interrupted by Governor asking
 // the service to stop: caller should exit the service goroutine.
 func (s *ServiceCtx) Sleep(duration time.Duration) bool {
 	select {
-	case <-s.Context.Done(): // context cancelled
+	case <-s.Context.Done(): // Canceled or DeadlineExceeded
 		return true
 	case <-time.After(duration):
 		return false
