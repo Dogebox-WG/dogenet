@@ -5,12 +5,16 @@
     var pre = document.getElementById('pre');
 
     var c = document.getElementById('c');
+    var d = document.getElementById('d');
+    var o = document.getElementById('o');
     var g = c.getContext("2d", { colorSpace: "srgb" });
-    // var dpi = window.devicePixelRatio || 1;
+    var dg = d.getContext("2d", { colorSpace: "srgb" });
+    var og = o.getContext("2d", { colorSpace: "srgb" });
+    var dpi = window.devicePixelRatio || 1;
 
     var size = 48;
-    var border = 16;
-    var scale = 2;
+    var border = 0;
+    var scale = 4;
 
     var total = size + (border * 2);
     c.width = total;
@@ -19,6 +23,18 @@
     c.style.width = viewsize + 'px';
     c.style.height = viewsize + 'px';
     c.style.imageRendering = 'pixelated';
+
+    d.width = size
+    d.height = size
+    d.style.width = size + 'px';
+    d.style.height = size + 'px';
+    d.style.imageRendering = 'pixelated';
+
+    o.width = size
+    o.height = size
+    o.style.width = size + 'px';
+    o.style.height = size + 'px';
+    o.style.imageRendering = 'pixelated';
 
     var url = "";
     var pic = null;
@@ -74,6 +90,8 @@
             console.log("draw", x, y, w, h);
             // g.imageSmoothingDisabled = true;
             g.drawImage(pic, x, y, w, h);
+            dg.drawImage(pic, x-border, y-border, w, h);
+            og.drawImage(pic, x-border, y-border, w, h);
         }
         g.fillStyle = "rgba(0,0,0,0.6)";
         g.fillRect(0, 0, total, border);
@@ -128,20 +146,21 @@
     });
 
     window.addEventListener('keydown', function(ev) {
-        if (ev.key == "+") { zoom = zoom * 1.25; redraw(); }
-        if (ev.key == "-") { zoom = zoom * 0.8; redraw(); }
+        if (ev.key == "+" || ev.key == "=") { zoom = zoom * 1.25; redraw(); }
+        if (ev.key == "-" || ev.key == "_") { zoom = zoom * 0.8; redraw(); }
+        if (ev.key == "r") redraw();
+        if (ev.key == "c") compress();
     });
 
     cm.addEventListener('click', function(ev) {
-        if (pic) {
-            var snap = g.getImageData(border, border, 48, 48);
-            console.log("compress", border, border, 48, 48, snap.length);
-            compressNow(snap);
-        }
-
+        compress();
     });
 
-    async function compressNow(snap) {
+    async function compress() {
+        if (!pic) return;
+        var snap = g.getImageData(border, border, 48, 48);
+        console.log("compress", border, border, 48, 48, snap.length);
+
         var res = await fetch("http://localhost:8085/compress", {
             method: "POST",
             mode: "same-origin",
@@ -172,6 +191,7 @@
             p += 4;
         }
         g.putImageData(snap, border, border);
+        dg.putImageData(snap, 0, 0);
         console.log("MODE", from[from.length-1]);
     }
 
