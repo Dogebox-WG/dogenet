@@ -57,9 +57,9 @@ func DogeNet(localNode string, localPort uint16, remotePort uint16, webPort uint
 	// }
 
 	// start connecting to Core Nodes.
-	for n := 0; n < CoreNodeListeners; n++ {
-		gov.Add(fmt.Sprintf("remote-%d", n), collector.New(db, store.Address{}, 5*time.Minute, false))
-	}
+	// for n := 0; n < CoreNodeListeners; n++ {
+	// 	gov.Add(fmt.Sprintf("remote-%d", n), collector.New(db, store.Address{}, 5*time.Minute, false))
+	// }
 
 	// start the web server.
 	gov.Add("web-api", web.New(db, "localhost", int(webPort)))

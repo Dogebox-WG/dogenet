@@ -3,6 +3,7 @@
     var u = document.getElementById('u');
     var cm = document.getElementById('cm');
     var pre = document.getElementById('pre');
+    var mt = document.getElementById('mt');
 
     var c = document.getElementById('c');
     var d = document.getElementById('d');
@@ -15,6 +16,9 @@
     var size = 48;
     var border = 0;
     var scale = 4;
+    var blend = 24; // 24=weighted 16=horizontal 8=average 0=top-left
+    var mode = 1; // 1=linear 0=pixellated
+    mt.innerText = 'L';
 
     var total = size + (border * 2);
     c.width = total;
@@ -62,8 +66,10 @@
                 var w = pic.width * zoom, h = pic.height * zoom;
                 ox = (size - w)/2;
                 oy = (size - h)/2;
-                console.log(zoom);
+                console.log("zoom",zoom);
+                blend=24; mode=1; mt.innerText = 'L';
                 redraw();
+                compress();
             };
             img.src = url;
         }
@@ -89,9 +95,9 @@
             }
             console.log("draw", x, y, w, h);
             // g.imageSmoothingDisabled = true;
-            g.drawImage(pic, x, y, w, h);
-            dg.drawImage(pic, x-border, y-border, w, h);
-            og.drawImage(pic, x-border, y-border, w, h);
+            g.drawImage(pic, x, y, w, h); // compressed zoom
+            dg.drawImage(pic, x-border, y-border, w, h); // compressed actual size
+            og.drawImage(pic, x-border, y-border, w, h); // original
         }
         g.fillStyle = "rgba(0,0,0,0.6)";
         g.fillRect(0, 0, total, border);
@@ -125,6 +131,7 @@
                 ox = touch.clientX + tx;
                 oy = touch.clientY + ty;
                 redraw();
+                compress();
                 break;
             }
         }
@@ -149,7 +156,13 @@
         if (ev.key == "+" || ev.key == "=") { zoom = zoom * 1.25; redraw(); }
         if (ev.key == "-" || ev.key == "_") { zoom = zoom * 0.8; redraw(); }
         if (ev.key == "r") redraw();
-        if (ev.key == "c") compress();
+        if (ev.key == "c") { blend=24; mode=1; mt.innerText = 'L'; compress(); } // weighted average
+        if (ev.key == "1") { blend=8; compress(); } // average 4 chroma
+        if (ev.key == "2") { blend=16; compress(); } // average 2 chroma (horizontal) -- best for "aurora"
+        if (ev.key == "3") { blend=0; compress(); }  // top-left chroma sample
+        if (ev.key == "l") { mode = 1; mt.innerText = 'L'; compress(); } // linear
+        if (ev.key == "p") { mode = 0; mt.innerText = 'P'; compress(); } // pixellated
+        if (ev.key == "o") { mode = -1; mt.innerText = 'A'; compress(); } // auto (min.sad)
     });
 
     cm.addEventListener('click', function(ev) {
@@ -158,10 +171,12 @@
 
     async function compress() {
         if (!pic) return;
-        var snap = g.getImageData(border, border, 48, 48);
-        console.log("compress", border, border, 48, 48, snap.length);
+        var opt = blend;
+        if (mode >= 0) opt |= 4 + mode;
+        var snap = og.getImageData(0, 0, 48, 48);
+        console.log("compress", blend, mode);
 
-        var res = await fetch("http://localhost:8085/compress", {
+        var res = await fetch("http://localhost:8085/compress?options="+opt, {
             method: "POST",
             mode: "same-origin",
             cache: "no-cache",
@@ -192,7 +207,6 @@
         }
         g.putImageData(snap, border, border);
         dg.putImageData(snap, 0, 0);
-        console.log("MODE", from[from.length-1]);
     }
 
 })();

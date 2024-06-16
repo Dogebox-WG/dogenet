@@ -106,6 +106,7 @@ func (a *WebAPI) compress(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// post body must be binary 48x48 RGB or RGBA
 		stride := 3
 		if len(body) == imgSizeRGBA {
 			stride = 4
@@ -114,7 +115,15 @@ func (a *WebAPI) compress(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_, res := dogeicon.Compress(body, stride)
+		// parse ?options=123
+		options := 0
+		opts := r.URL.Query().Get("options")
+		if opti, err := strconv.Atoi(opts); err == nil {
+			options = opti
+		}
+		log.Printf("Options: %v", options)
+
+		_, res := dogeicon.Compress(body, stride, options)
 
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
