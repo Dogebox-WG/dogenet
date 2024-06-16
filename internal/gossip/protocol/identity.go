@@ -48,12 +48,16 @@ func DecodeIdentityMsg(payload []byte, version int32) (msg IdentityMsg) {
 
 func EncodeIdentityMsg(msg IdentityMsg) []byte {
 	if len(msg.Name) > 32 {
-
+		panic("Invalid identity: name longer than 32")
+	}
+	if len(msg.Bio) > 128 {
+		panic("Invalid identity: bio longer than 128")
 	}
 	e := codec.Encode(34)
 	e.Int64le(msg.Time)
 	e.VarString(msg.Name)
 	e.VarString(msg.Bio)
-	e.UInt16be(msg.Port)
+	e.Bytes(msg.Icon)
+	e.UInt8(msg.IconStyle)
 	return e.Result()
 }

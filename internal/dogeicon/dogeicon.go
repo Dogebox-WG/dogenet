@@ -5,7 +5,6 @@ import (
 )
 
 const (
-	stride = 64 * 3
 	// encoding:
 	Kr  = 0.2126
 	Kg  = 0.7152
@@ -111,16 +110,32 @@ plane0 Y1Y2 (24*24*6*2/8=864) || plane1 CbCr (24*24*4*2/8=576) || plane2 topolog
 	    /3      2\      22      02   2-bit topology as per diagram (0=/ 1=\ 2=H 3=V)
 
 Bytes are filled with bits left to right (left=MSB right=LSB)
+
+Other options:
+
+	(24*24*5*2/8=720) 2Y (24*24*5*2/8=720) CbCr (24*24*2/8=144) topo = 1584 (rebalance)
+	(24*24*12*2/8=1728) 2x rgb4 + topo (24*24*2/8=144) = 1872 (colour reproduction)
+	(24*24*12*2/8=1728) 2x rgb4 + topo (24*24*3/8=216) = 1944 (more topologies)
+	(48*48*6/8=1728) pixels + (64*12/8) palette = 1824 (64-colour palette)
+	more topologies: 4 corners, vert & horz, cross
+
+Rebalanced Encode:
+
+	5 Y0 5 Y1 5 Cr 5 Cb 2 Top = 22
+	0+22=22 (write 16) 22-16=6
+	6+22=28  (write 28) 28-28=0
 */
-func Compress(rgb []byte, style byte) (comp [1584]byte) {
-	compFlat := Compress1(rgb, 0)
-	compLinear := Compress1(rgb, 1)
+func Compress(rgb []byte, components int) (comp []byte, res []byte) {
+	compFlat := Compress1(rgb, 0, components)
+	compLinear := Compress1(rgb, 1, components)
 	resFlat := Uncompress(compFlat[:], 0)
 	resLinear := Uncompress(compFlat[:], 1)
 	if sad(rgb, resFlat[:]) < sad(rgb, resLinear[:]) {
-		return compFlat
+		log.Printf("MODE 0")
+		return compFlat[:], resFlat[:]
 	}
-	return compLinear
+	log.Printf("MODE 1")
+	return compLinear[:], resLinear[:]
 }
 
 // Sum of Absolute Difference between 48x48 images.
@@ -132,7 +147,7 @@ func sad(rgb []byte, res []byte) uint {
 	return sum
 }
 
-func Compress1(rgb []byte, style byte) (comp [1584]byte) {
+func Compress1(rgb []byte, style byte, components int) (comp [1585]byte) {
 	// encode flat or linear style
 	topMap := topoMap[style&1]
 	// encoding state
@@ -145,11 +160,22 @@ func Compress1(rgb []byte, style byte) (comp [1584]byte) {
 	compT := 1440
 
 	// for each 2x2 tile:
+	stride := 48 * components
 	for y := 0; y < 48; y += 2 {
 		row := y * stride
 		for x := 0; x < 48; x += 2 {
-			r1 := row + x
-			r2 := row + stride + x
+			r1 := row + (x * components)
+			r2 := r1 + components
+			r3 := row + stride + (x * components)
+			r4 := r3 + components
+
+			// assemble RGB tile values for topology calc
+			tile := &Tile{
+				uint(rgb[r1]), uint(rgb[r1+1]), uint(rgb[r1+2]), // TL
+				uint(rgb[r2]), uint(rgb[r2+1]), uint(rgb[r2+2]), // TR
+				uint(rgb[r3]), uint(rgb[r3+1]), uint(rgb[r3+2]), // BL
+				uint(rgb[r4]), uint(rgb[r4+1]), uint(rgb[r4+2]), // BR
+			}
 
 			// 1. convert 2x2 tile to YCbCr
 			R0 := float32(rgb[r1])
@@ -158,28 +184,30 @@ func Compress1(rgb []byte, style byte) (comp [1584]byte) {
 			Y0 := R0*Kr + G0*Kg + B0*Kb
 			Cb0 := R0*CbR + G0*CbG + B0*CbB
 			Cr0 := R0*CrR + G0*CrG + B0*CrB
-			R1 := float32(rgb[r1+3])
-			G1 := float32(rgb[r1+4])
-			B1 := float32(rgb[r1+5])
+			R1 := float32(rgb[r2])
+			G1 := float32(rgb[r2+1])
+			B1 := float32(rgb[r2+2])
 			Y1 := R1*Kr + G1*Kg + B1*Kb
 			Cb0 += R1*CbR + G1*CbG + B1*CbB
 			Cr0 += R1*CrR + G1*CrG + B1*CrB
-			R2 := float32(rgb[r2])
-			G2 := float32(rgb[r2+1])
-			B2 := float32(rgb[r2+2])
+			R2 := float32(rgb[r3])
+			G2 := float32(rgb[r3+1])
+			B2 := float32(rgb[r3+2])
 			Y2 := R2*Kr + G2*Kg + B2*Kb
 			Cb0 += R2*CbR + G2*CbG + B2*CbB
 			Cr0 += R2*CrR + G2*CrG + B2*CrB
-			R3 := float32(rgb[r2+3])
-			G3 := float32(rgb[r2+4])
-			B3 := float32(rgb[r2+5])
+			R3 := float32(rgb[r4])
+			G3 := float32(rgb[r4+1])
+			B3 := float32(rgb[r4+2])
 			Y3 := R3*Kr + G3*Kg + B3*Kb
 			Cb0 += R3*CbR + G3*CbG + B3*CbB
 			Cr0 += R3*CrR + G3*CrG + B3*CrB
+			Cb0 /= 4.0
+			Cr0 /= 4.0
 
 			// compressed CbCr values (quantized)
-			CbQ := uint(((Cb0 / 4.0) + ofsCbCr) * scaleCbCr)
-			CrQ := uint(((Cr0 / 4.0) + ofsCbCr) * scaleCbCr)
+			CbQ := uint((Cb0 + ofsCbCr) * scaleCbCr)
+			CrQ := uint((Cr0 + ofsCbCr) * scaleCbCr)
 			if CbQ > 15 || CrQ > 15 {
 				log.Printf("quantized CbCr out of bounds: Cb %v Cr %v\n", CbQ, CrQ)
 			}
@@ -232,17 +260,10 @@ func Compress1(rgb []byte, style byte) (comp [1584]byte) {
 				(Y1Q + Y3Q) >> 1, // '|' vertical lerp
 			}
 
-			// assemble RGB tile values for topology calc
-			tile := &Tile{
-				uint(rgb[r1]), uint(rgb[r1+1]), uint(rgb[r1+2]), // TL
-				uint(rgb[r1+3]), uint(rgb[r1+4]), uint(rgb[r1+5]), // TR
-				uint(rgb[r2]), uint(rgb[r2+1]), uint(rgb[r2+2]), // BL
-				uint(rgb[r2+3]), uint(rgb[r2+4]), uint(rgb[r2+5]), // BR
-			}
-
 			// 2. choose topology to minimise error
 			minsad := uint(4096) // > 255*12
 			topology := uint(0)
+			var sads [4]uint
 			for q := uint(0); q < 4; q++ {
 				tmap := &topMap[q]
 				Ytl := float32(Ys[tmap[0]]) * unscaleY
@@ -262,11 +283,13 @@ func Compress1(rgb []byte, style byte) (comp [1584]byte) {
 					diff(tile.brG, uint(Ybr+Green)) +
 					diff(tile.brB, uint(Ybr+Blue))
 				sad := tl + tr + bl + br
+				sads[q] = sad
 				if sad < minsad {
 					minsad = sad
 					topology = q
 				}
 			}
+			// log.Printf("SAD %v %d :: %v %v %v %v :: %v", y, x, sads[0], sads[1], sads[2], sads[3], topology)
 			// 3. compute encoded Y components
 			var Y0bits, Y1bits uint
 			switch topology {
@@ -305,6 +328,7 @@ func Compress1(rgb []byte, style byte) (comp [1584]byte) {
 			Tacc |= topology << Tbit
 			Tbit -= 2
 			if Tbit < 0 { // 8 bits encoded
+				Tbit = 6
 				comp[compT] = byte(Tacc)
 				compT++
 				Tacc = 0
@@ -314,6 +338,8 @@ func Compress1(rgb []byte, style byte) (comp [1584]byte) {
 	// for other image sizes:
 	// if Ybit != 12 { output Yacc>>16, Yacc>>8 } // odd no. tiles
 	// if Tbit != 6 { output Tacc } // no. tiles not divisible by 8
+	// append the style byte:
+	comp[1584] = style
 	return
 }
 
@@ -362,11 +388,10 @@ func Uncompress(comp []byte, style byte) (rgb [6912]byte) {
 	linear := style & 1
 
 	// for each 2x2 tile:
+	const stride = 48 * 3
 	for y := 0; y < 48; y += 2 {
 		row := y * stride
 		for x := 0; x < 48; x += 2 {
-			r1 := row + x
-			r2 := row + stride + x
 
 			// decode Y0, Y1, topology
 			if Ybit < 0 {
@@ -377,7 +402,7 @@ func Uncompress(comp []byte, style byte) (rgb [6912]byte) {
 			if Tbit < 0 {
 				Tacc = uint(comp[compT])
 				compT++
-				Ybit = 12
+				Tbit = 6
 			}
 
 			Y0 := (Yacc >> (Ybit + 6)) & 63
@@ -449,22 +474,38 @@ func Uncompress(comp []byte, style byte) (rgb [6912]byte) {
 			Green := Cr*GCr + Cb*GCb
 			Blue := Cb * BCb
 
+			r1 := row + (x * 3)
+			r2 := r1 + stride
 			// top-left pixel
 			rgb[r1] = clamp(Ytl + Red)
 			rgb[r1+1] = clamp(Ytl + Green)
 			rgb[r1+2] = clamp(Ytl + Blue)
 			// top-right pixel
-			rgb[r1+3] = clamp(Ytr + Red)
-			rgb[r1+4] = clamp(Ytr + Green)
-			rgb[r1+5] = clamp(Ytr + Blue)
-			// bottom-left pixel
-			rgb[r2] = clamp(Ybl + Red)
-			rgb[r2+1] = clamp(Ybl + Green)
-			rgb[r2+2] = clamp(Ybl + Blue)
-			// bottom-right pixel
-			rgb[r2+3] = clamp(Ybr + Red)
-			rgb[r2+4] = clamp(Ybr + Green)
-			rgb[r2+5] = clamp(Ybr + Blue)
+			if true {
+				rgb[r1+3] = clamp(Ytr + Red)
+				rgb[r1+4] = clamp(Ytr + Green)
+				rgb[r1+5] = clamp(Ytr + Blue)
+				// bottom-left pixel
+				rgb[r2] = clamp(Ybl + Red)
+				rgb[r2+1] = clamp(Ybl + Green)
+				rgb[r2+2] = clamp(Ybl + Blue)
+				// bottom-right pixel
+				rgb[r2+3] = clamp(Ybr + Red)
+				rgb[r2+4] = clamp(Ybr + Green)
+				rgb[r2+5] = clamp(Ybr + Blue)
+			} else {
+				rgb[r1+3] = clamp(Ytl + Red)
+				rgb[r1+4] = clamp(Ytl + Green)
+				rgb[r1+5] = clamp(Ytl + Blue)
+				// bottom-left pixel
+				rgb[r2] = clamp(Ytl + Red)
+				rgb[r2+1] = clamp(Ytl + Green)
+				rgb[r2+2] = clamp(Ytl + Blue)
+				// bottom-right pixel
+				rgb[r2+3] = clamp(Ytl + Red)
+				rgb[r2+4] = clamp(Ytl + Green)
+				rgb[r2+5] = clamp(Ytl + Blue)
+			}
 		}
 	}
 	return
