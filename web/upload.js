@@ -8,9 +8,11 @@
     var c = document.getElementById('c');
     var d = document.getElementById('d');
     var o = document.getElementById('o');
+    var dl = document.getElementById('dl');
     var g = c.getContext("2d", { colorSpace: "srgb" });
     var dg = d.getContext("2d", { colorSpace: "srgb" });
     var og = o.getContext("2d", { colorSpace: "srgb" });
+    var dlg = dl.getContext("2d", { colorSpace: "srgb" });
     var dpi = window.devicePixelRatio || 1;
 
     var size = 48;
@@ -39,6 +41,12 @@
     o.style.width = size + 'px';
     o.style.height = size + 'px';
     o.style.imageRendering = 'pixelated';
+
+    dl.width = size*2
+    dl.height = size
+    dl.style.width = size*2 + 'px';
+    dl.style.height = size + 'px';
+    dl.style.imageRendering = 'pixelated';
 
     var url = "";
     var pic = null;
@@ -197,6 +205,9 @@
         if (!buf) { console.log("arrayBuffer is undefined"); return; }
         var from = new Uint8Array(buf);
         if (from.length != 6912) { console.log("Wrong size: "+from.length+" (expected 6912)"); return; }
+
+        dlg.putImageData(snap, size, 0); // uncompressed
+
         var to = snap.data;
         for (var i=0; i<48*48*3; i+=3) {
             to[p] = from[i];
@@ -207,6 +218,8 @@
         }
         g.putImageData(snap, border, border);
         dg.putImageData(snap, 0, 0);
+
+        dlg.putImageData(snap, 0, 0); // compressed
     }
 
 })();
