@@ -73,28 +73,6 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// func (a *WebAPI) uploadPage(w http.ResponseWriter, r *http.Request) {
-// 	if r.Method == http.MethodGet {
-// 		r, err := os.Open("web/upload.html")
-// 		if err != nil {
-// 			http.Error(w, "not found", http.StatusNotFound)
-// 			return
-// 		}
-// 		defer r.Close()
-// 		bytes, err := io.ReadAll(r)
-// 		if err != nil {
-// 			http.Error(w, "cannot read", http.StatusNotFound)
-// 			return
-// 		}
-// 		w.Header().Set("Content-Type", "text/html")
-// 		w.Header().Set("Content-Length", strconv.Itoa(len(bytes)))
-// 		w.Header().Set("Allow", "GET, OPTIONS")
-// 		w.Write(bytes)
-// 	} else {
-// 		options(w, r, "GET, OPTIONS")
-// 	}
-// }
-
 const imgSizeRGB = 48 * 48 * 3
 const imgSizeRGBA = 48 * 48 * 4
 

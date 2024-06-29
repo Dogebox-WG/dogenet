@@ -141,6 +141,12 @@ Other options:
 Rebalanced Encode:
 
 	5 Y0 5 Y1 5 Cr 5 Cb 2 Top = 22
+
+Data-dependent compression:
+
+	Block difference
+	Intra-block difference
+	Logarithmic quantization
 */
 func Compress(rgb []byte, components int, options int) (comp []byte, res []byte) {
 	if options&4 != 0 {

@@ -22,12 +22,13 @@ type netService struct {
 	mutex       sync.Mutex
 	listner     net.Listener
 	privKey     protocol.PrivKey
+	identPub    protocol.PubKey
 	remotePort  uint16
 	connections map[net.Conn]struct{}
 }
 
 func New(address spec.Address, remotePort uint16) governor.Service {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic(fmt.Sprintf("cannot generate pubkey: %v", err))
 	}
@@ -38,6 +39,7 @@ func New(address spec.Address, remotePort uint16) governor.Service {
 		address:     address,
 		connections: make(map[net.Conn]struct{}),
 		privKey:     priv,
+		identPub:    pub,
 		remotePort:  remotePort,
 	}
 }
@@ -135,10 +137,11 @@ func (ns *netService) inboundConnection(conn net.Conn) {
 
 func (ns *netService) sendMyAddress(conn net.Conn) {
 	addr := protocol.AddressMsg{
-		Time:     time.Now().Unix(),
-		Services: 1,
-		Address:  ns.address.Host.To16(), // can be nil
-		Port:     ns.address.Port,
+		Time:        uint32(time.Now().Unix()),
+		ServiceBits: 1,
+		Address:     ns.address.Host.To16(), // can be nil
+		Port:        ns.address.Port,
 	}
+	copy(addr.Identity, ns.identPub)
 	conn.Write(protocol.EncodeMessage(protocol.AddrTag, ns.privKey, protocol.EncodeAddrMsg(addr)))
 }

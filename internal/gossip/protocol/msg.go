@@ -33,10 +33,6 @@ type MessageHeader struct { // 104 bytes
 	Signature []byte // [64]byte
 }
 
-// var accepted = map[uint32]string{
-// 	binary.LittleEndian.Uint32([]byte("DNet")): "DNet",
-// }
-
 func EncodeMessage(tag uint32, privkey PrivKey, payload []byte) []byte {
 	if len(payload) > MaxMsgSize {
 		panic("EncodeMessage: message too large: " + strconv.Itoa(len(payload)))

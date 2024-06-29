@@ -75,7 +75,8 @@ func (e *Encoder) VarString(v string) {
 }
 
 func (e *Encoder) PadString(size uint64, v string) {
-	e.buf = append(e.buf, []byte(v)...)
+	bytes := []byte(v)
+	e.buf = append(e.buf, bytes[0:size]...)
 	used := uint64(len(v))
 	for used < size {
 		e.buf = append(e.buf, 0)
