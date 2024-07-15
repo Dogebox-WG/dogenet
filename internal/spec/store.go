@@ -22,6 +22,7 @@ type Store interface {
 	NewNetNode(address Address, time int64)
 	CoreStats() (mapSize int, newNodes int)
 	NetStats() (mapSize int, newNodes int)
+	NodeKey() (pub PubKey, priv PrivKey)
 	TrimNodes()
 	NodeList() (res NodeListRes)
 	LoadFrom(filename string) error
@@ -70,7 +71,8 @@ func ParseAddress(hostport string) (Address, error) {
 	return Address{Host: host, Port: uint16(port)}, nil
 }
 
-type PubKey [32]byte
+type PubKey []byte  // Public Key 32 bytes
+type PrivKey []byte // Private Key 32 bytes (seed entropy)
 
 func (key PubKey) String() string {
 	return hex.EncodeToString(key[:])

@@ -7,7 +7,7 @@ import "time"
 // Range: 2013 - 2149
 type DogeTime uint32
 
-func (ts DogeTime) ToUnix() time.Time {
+func (ts DogeTime) Local() time.Time {
 	return time.Unix(int64(ts)+DogeEpoch, 0)
 }
 

@@ -21,7 +21,6 @@ var ChannelB0rk = makeTag4CC("B0rk")
 // well-known services
 var ServiceCore = makeTag4CC("Core")
 
-type Tag4CC uint32                // Big-Endian Four Character Code
 type PrivSeed = []byte            // [32]seed (random)
 type PrivKey = ed25519.PrivateKey // [32]privkey then [32]pubkey
 type PubKey = ed25519.PublicKey   // [32]pubkey
@@ -76,33 +75,35 @@ func ReadMessage(reader *bufio.Reader) (Message, error) {
 	// Decode the header
 	msg := DecodeMessage(&buf)
 	if msg.Size > MaxMsgSize {
-		return Message{}, fmt.Errorf("message too large: [%s] size is %d bytes", TagToStr(msg.Tag), msg.Size)
+		return Message{}, fmt.Errorf("message too large: [%s] size is %d bytes", msg.Tag, msg.Size)
 	}
 	// Read the message payload
 	msg.Payload = make([]byte, msg.Size)
 	n, err = io.ReadFull(reader, msg.Payload)
 	if err != nil {
-		return Message{}, fmt.Errorf("short payload: [%s] received %d of %d bytes: %v", TagToStr(msg.Tag), n, msg.Size, err)
+		return Message{}, fmt.Errorf("short payload: [%s] received %d of %d bytes: %v", msg.Tag, n, msg.Size, err)
 	}
 	// Verify signature
 	if !ed25519.Verify(msg.PubKey, msg.Payload, msg.Signature) {
-		return Message{}, fmt.Errorf("incorrect signature: [%s] message", TagToStr(msg.Tag))
+		return Message{}, fmt.Errorf("incorrect signature: [%s] message", msg.Tag)
 	}
 	return msg, nil
 }
 
-func TagToStr(tag Tag4CC) string {
+func makeTag4CC(tag string) Tag4CC {
+	return Tag4CC(binary.BigEndian.Uint32([]byte(tag)))
+}
+
+type Tag4CC uint32 // Big-Endian Four Character Code
+
+func (t Tag4CC) String() string {
 	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(tag))
+	binary.LittleEndian.PutUint32(buf[:], uint32(t))
 	return string(buf[:])
 }
 
-func TagToBytes(tag Tag4CC) []byte {
+func (t Tag4CC) Bytes() []byte {
 	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(tag))
+	binary.LittleEndian.PutUint32(buf[:], uint32(t))
 	return buf[:]
-}
-
-func makeTag4CC(tag string) Tag4CC {
-	return Tag4CC(binary.BigEndian.Uint32([]byte(tag)))
 }

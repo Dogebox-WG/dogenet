@@ -39,7 +39,7 @@ func DogeNet(localNode string, localPort uint16, remotePort uint16, webPort uint
 	if localPort == 0 {
 		localPort = spec.DogeNetDefaultPort
 	}
-	gov.Add("gossip", gossip.New(spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort}, remotePort))
+	gov.Add("gossip", gossip.New(spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort}, remotePort, db))
 
 	// stay connected to local node if specified.
 	if localNode != "" {
@@ -53,7 +53,7 @@ func DogeNet(localNode string, localPort uint16, remotePort uint16, webPort uint
 
 	// stay connected to DogeNet nodes.
 	// for n := 0; n < DogeNetConnections; n++ {
-	// 	gov.Add("core-crawler", NewDogeNet())
+	// 	gov.Add("", NewDogeNet())
 	// }
 
 	// start connecting to Core Nodes.

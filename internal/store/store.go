@@ -1,13 +1,17 @@
 package store
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	cryptorand "crypto/rand"
 	"encoding/gob"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"sync"
 	"time"
+
+	"math/rand"
 
 	"github.com/dogeorg/dogenet/internal/spec"
 )
@@ -53,6 +57,8 @@ type NodeSet struct {
 // index: `ip_16`,`port_2` (unique address lookup)
 // new fields: `ident_32`,`sig_64`
 type NetMapState struct {
+	NodePub  []byte
+	NodePriv []byte
 	Core     NodeSet
 	Net      NodeSet
 	migrated int // format: 0=slash-port 1=colon-port 2=spec.Address
@@ -63,11 +69,27 @@ type NetMap struct {
 	state NetMapState // persisted in Gob file
 }
 
+var emptyPriv spec.PrivKey
+
 func New() spec.Store {
 	return &NetMap{state: NetMapState{
 		Core: NodeSet{Nodes: make(nodeIDMap)},
 		Net:  NodeSet{Nodes: make(nodeIDMap)},
 	}}
+}
+
+func (t *NetMap) NodeKey() (pub spec.PubKey, priv spec.PrivKey) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if bytes.Equal(t.state.NodePriv[:], emptyPriv[:]) {
+		pub, priv, err := ed25519.GenerateKey(cryptorand.Reader)
+		if err != nil {
+			panic(fmt.Sprintf("cannot generate pubkey: %v", err))
+		}
+		t.state.NodePub = pub
+		t.state.NodePriv = priv.Seed()
+	}
+	return t.state.NodePub, t.state.NodePriv
 }
 
 func (t *NetMap) CoreStats() (mapSize int, newNodes int) {

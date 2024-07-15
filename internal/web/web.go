@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ func New(store spec.Store, bind string, port int) governor.Service {
 	}
 	mux.HandleFunc("/nodes", a.getNodes)
 	mux.HandleFunc("/compress", a.compress)
+	mux.HandleFunc("/addpeer", a.addpeer)
 
 	fs := http.FileServer(http.Dir("./web"))
 	mux.Handle("/web/", http.StripPrefix("/web/", fs))
@@ -104,6 +106,54 @@ func (a *WebAPI) compress(w http.ResponseWriter, r *http.Request) {
 		_, res := dogeicon.Compress(body, stride, options)
 
 		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
+		w.Header().Set("Allow", "POST, OPTIONS")
+		w.Write(res[:])
+	} else {
+		options(w, r, "POST, OPTIONS")
+	}
+}
+
+type AddPeer struct {
+	Key  string `json:key`
+	Addr string `json:addr`
+}
+
+func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		// request
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
+			return
+		}
+		var to AddPeer
+		err = json.Unmarshal(body, &to)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error decoding JSON: %s", err.Error()), http.StatusBadRequest)
+			return
+		}
+
+		// add peer
+		pub, err := hex.DecodeString(to.Key)
+		if err != nil || len(pub) != 32 {
+			http.Error(w, fmt.Sprintf("invalid key: %v", err), http.StatusBadRequest)
+			return
+		}
+		addr, err := spec.ParseAddress(to.Addr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid peer address: %v", err), http.StatusBadRequest)
+			return
+		}
+		a.store.AddNetNode(pub, addr, time.Now().Unix(), 0)
+
+		// response
+		res, err := json.Marshal("OK")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error encoding JSON: %s", err.Error()), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
 		w.Header().Set("Allow", "POST, OPTIONS")
 		w.Write(res[:])

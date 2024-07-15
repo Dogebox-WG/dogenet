@@ -13,7 +13,7 @@ func main() {
 	// required IP address of local node.
 	// core node addresses are discovered via the local node.
 	if len(os.Args) < 2 {
-		log.Printf("usage: dogenet <local-core-node-ip>")
+		log.Printf("usage: dogenet <local-core-node-ip> <port-offset>")
 	}
 	localNode := os.Args[1]
 	webPort := 8085
