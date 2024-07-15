@@ -62,6 +62,12 @@ func (d *Decoder) UInt32le() uint32 {
 	return binary.LittleEndian.Uint32(d.buf[p : p+4])
 }
 
+func (d *Decoder) UInt32be() uint32 {
+	p := d.pos
+	d.pos += 4
+	return binary.BigEndian.Uint32(d.buf[p : p+4])
+}
+
 func (d *Decoder) UInt64le() uint64 {
 	p := d.pos
 	d.pos += 8

@@ -6,7 +6,7 @@ import (
 	"github.com/dogeorg/dogenet/internal/codec"
 )
 
-var TagReject = binary.LittleEndian.Uint32([]byte("Rejc"))
+var TagReject = Tag4CC(binary.BigEndian.Uint32([]byte("Rejc")))
 
 type RejectCode uint8
 
@@ -15,7 +15,8 @@ const (
 	REJECT_SIZE      RejectCode = 0x01
 	REJECT_SIGNATURE RejectCode = 0x02
 	REJECT_TAG       RejectCode = 0x03
-	REJECT_OBSOLETE  RejectCode = 0x04
+	REJECT_CHAN      RejectCode = 0x04
+	REJECT_OBSOLETE  RejectCode = 0x05
 	// message handling:
 	REJECT_LIMIT        RejectCode = 0x10
 	REJECT_MALFORMED    RejectCode = 0x11
@@ -41,6 +42,8 @@ func (m *RejectMsg) CodeName() string {
 		return "bad signature"
 	case REJECT_TAG:
 		return "unrecognised tag"
+	case REJECT_CHAN:
+		return "unrecognised channel"
 	case REJECT_OBSOLETE:
 		return "obsolete message"
 	case REJECT_MALFORMED:

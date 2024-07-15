@@ -45,6 +45,10 @@ func (e *Encoder) UInt32le(v uint32) {
 	e.buf = binary.LittleEndian.AppendUint32(e.buf, v)
 }
 
+func (e *Encoder) UInt32be(v uint32) {
+	e.buf = binary.BigEndian.AppendUint32(e.buf, v)
+}
+
 func (e *Encoder) UInt64le(v uint64) {
 	e.buf = binary.LittleEndian.AppendUint64(e.buf, v)
 }

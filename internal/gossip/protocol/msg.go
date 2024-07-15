@@ -11,14 +11,22 @@ import (
 
 const MaxMsgSize = 0x1000080 // 16MB (block size is 1MB; 16x=16MB + 128 header 0x80)
 
-// DogeNet magic bytes?
-// var NetworkID = binary.LittleEndian.Uint32([]byte("DNet"))
+// well-known channels
+var ChannelDoge = makeTag4CC("Doge")
+var ChannelIdentity = makeTag4CC("Iden")
+var ChannelChat = makeTag4CC("Chat")
+var ChannelShibeShop = makeTag4CC("Shib")
+var ChannelB0rk = makeTag4CC("B0rk")
 
-type RawPriv = []byte             // [32]seed (random)
+// well-known services
+var ServiceCore = makeTag4CC("Core")
+
+type Tag4CC uint32                // Big-Endian Four Character Code
+type PrivSeed = []byte            // [32]seed (random)
 type PrivKey = ed25519.PrivateKey // [32]privkey then [32]pubkey
 type PubKey = ed25519.PublicKey   // [32]pubkey
 
-func NewPrivKey(priv []byte) (pk PrivKey) {
+func NewPrivKey(priv PrivSeed) (pk PrivKey) {
 	if len(priv) != 32 {
 		panic("PrivKey: malformed private key (not 32 bytes)")
 	}
@@ -26,67 +34,75 @@ func NewPrivKey(priv []byte) (pk PrivKey) {
 	return
 }
 
-type MessageHeader struct { // 104 bytes
-	Tag       uint32 // big-endian [4]byte code
-	Length    uint32
+type Message struct { // 108 bytes fixed size header
+	Chan      Tag4CC // [4] Channel Name [big-endian]
+	Tag       Tag4CC // [4] Message Name [big-endian]
+	Size      uint32 // [4] Size of the payload (excluding header)
 	PubKey    []byte // [32]byte
 	Signature []byte // [64]byte
+	Payload   []byte // ... message payload
 }
 
-func EncodeMessage(tag uint32, privkey PrivKey, payload []byte) []byte {
+func EncodeMessage(channel Tag4CC, tag Tag4CC, privkey PrivKey, payload []byte) []byte {
 	if len(payload) > MaxMsgSize {
 		panic("EncodeMessage: message too large: " + strconv.Itoa(len(payload)))
 	}
-	msg := make([]byte, 104+len(payload))
-	binary.LittleEndian.PutUint32(msg[0:4], tag)
-	binary.LittleEndian.PutUint32(msg[4:8], uint32(len(payload)))
-	copy(msg[8:40], privkey[32:])                     // 32 bytes: inline privkey.Public()
-	copy(msg[40:104], ed25519.Sign(privkey, payload)) // 64 bytes
-	copy(msg[104:], payload)
+	msg := make([]byte, 108+len(payload))
+	binary.BigEndian.PutUint32(msg[0:4], uint32(channel))
+	binary.BigEndian.PutUint32(msg[4:8], uint32(tag))
+	binary.LittleEndian.PutUint32(msg[8:12], uint32(len(payload)))
+	copy(msg[12:44], privkey[32:])
+	copy(msg[44:108], ed25519.Sign(privkey, payload))
+	copy(msg[108:], payload)
 	return msg
 }
 
-func DecodeHeader(buf *[104]byte) (hdr MessageHeader) {
-	hdr.Tag = binary.LittleEndian.Uint32(buf[0:4])
-	hdr.Length = binary.LittleEndian.Uint32(buf[4:8])
-	hdr.PubKey = buf[12:40]     // [32]byte
-	hdr.Signature = buf[40:104] // [64]byte
+func DecodeMessage(buf *[108]byte) (msg Message) {
+	msg.Chan = Tag4CC(binary.BigEndian.Uint32(buf[0:4]))
+	msg.Tag = Tag4CC(binary.BigEndian.Uint32(buf[4:8]))
+	msg.Size = binary.LittleEndian.Uint32(buf[8:12])
+	msg.PubKey = buf[12:44]     // [32]byte
+	msg.Signature = buf[44:108] // [64]byte
 	return
 }
 
-func ReadMessage(reader *bufio.Reader) (tag uint32, payload []byte, pubkey []byte, err error) {
+func ReadMessage(reader *bufio.Reader) (Message, error) {
 	// Read the message header
-	buf := [104]byte{}
+	buf := [108]byte{}
 	n, err := io.ReadFull(reader, buf[:])
 	if err != nil {
-		return 0, nil, []byte{}, fmt.Errorf("short header: received %d bytes: %v", n, err)
+		return Message{}, fmt.Errorf("short header: received %d bytes: %v", n, err)
 	}
 	// Decode the header
-	hdr := DecodeHeader(&buf)
-	if hdr.Length > MaxMsgSize {
-		return 0, nil, []byte{}, fmt.Errorf("message too large: [%s] size is %d bytes", TagToStr(hdr.Tag), hdr.Length)
+	msg := DecodeMessage(&buf)
+	if msg.Size > MaxMsgSize {
+		return Message{}, fmt.Errorf("message too large: [%s] size is %d bytes", TagToStr(msg.Tag), msg.Size)
 	}
 	// Read the message payload
-	payload = make([]byte, hdr.Length)
-	n, err = io.ReadFull(reader, payload)
+	msg.Payload = make([]byte, msg.Size)
+	n, err = io.ReadFull(reader, msg.Payload)
 	if err != nil {
-		return 0, nil, []byte{}, fmt.Errorf("short payload: [%s] received %d of %d bytes: %v", TagToStr(hdr.Tag), n, hdr.Length, err)
+		return Message{}, fmt.Errorf("short payload: [%s] received %d of %d bytes: %v", TagToStr(msg.Tag), n, msg.Size, err)
 	}
 	// Verify signature
-	if !ed25519.Verify(hdr.PubKey, payload, hdr.Signature) {
-		return 0, nil, []byte{}, fmt.Errorf("incorrect signature: [%s] message", TagToStr(hdr.Tag))
+	if !ed25519.Verify(msg.PubKey, msg.Payload, msg.Signature) {
+		return Message{}, fmt.Errorf("incorrect signature: [%s] message", TagToStr(msg.Tag))
 	}
-	return hdr.Tag, payload, hdr.PubKey, nil
+	return msg, nil
 }
 
-func TagToStr(tag uint32) string {
+func TagToStr(tag Tag4CC) string {
 	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], tag)
+	binary.LittleEndian.PutUint32(buf[:], uint32(tag))
 	return string(buf[:])
 }
 
-func TagToBytes(tag uint32) []byte {
+func TagToBytes(tag Tag4CC) []byte {
 	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], tag)
+	binary.LittleEndian.PutUint32(buf[:], uint32(tag))
 	return buf[:]
+}
+
+func makeTag4CC(tag string) Tag4CC {
+	return Tag4CC(binary.BigEndian.Uint32([]byte(tag)))
 }

@@ -4,12 +4,10 @@ import (
 	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/dogeorg/dogenet/internal/gossip/protocol"
 	"github.com/dogeorg/dogenet/internal/governor"
@@ -21,6 +19,7 @@ type netService struct {
 	address     spec.Address
 	mutex       sync.Mutex
 	listner     net.Listener
+	channels    map[protocol.Tag4CC]chan protocol.Message
 	privKey     protocol.PrivKey
 	identPub    protocol.PubKey
 	remotePort  uint16
@@ -104,44 +103,54 @@ func (ns *netService) trackConn(c net.Conn, add bool) bool {
 
 func (ns *netService) inboundConnection(conn net.Conn) {
 	// receive messages from peer
-	who := ns.address.String()
+	// who := ns.address.String()
 	reader := bufio.NewReader(conn)
 	ns.sendMyAddress(conn)
 	for {
-		tag, msg, _, err := protocol.ReadMessage(reader)
+		msg, err := protocol.ReadMessage(reader)
 		if err != nil {
 			log.Printf("bad message: %v", err)
 			return // close connection
 		}
-		switch tag {
-
-		case protocol.TagReject:
-			rej := protocol.DecodeReject(msg)
-			if rej.Code == protocol.REJECT_TAG {
-				fmt.Printf("[%s] Reject tag: %s %s\n", who, string(rej.Data), rej.Reason)
-			} else {
-				fmt.Printf("[%s] Reject: %s %s %s\n", who, rej.CodeName(), rej.Reason, hex.EncodeToString(rej.Data))
-			}
-
-		default:
-			_, err := conn.Write(
-				protocol.EncodeMessage(protocol.TagReject, ns.privKey,
-					protocol.EncodeReject(protocol.REJECT_TAG, "not supported", protocol.TagToBytes(tag))))
-			if err != nil {
-				log.Printf("failed to send message")
-				return // drop connection
-			}
+		// dispatch the message to the channel listener
+		if channel, ok := ns.channels[msg.Chan]; ok {
+			channel <- msg
 		}
+
+		// switch tag {
+		// case protocol.TagReject:
+		// 	rej := protocol.DecodeReject(msg)
+		// 	if rej.Code == protocol.REJECT_TAG {
+		// 		fmt.Printf("[%s] Reject tag: %s %s\n", who, string(rej.Data), rej.Reason)
+		// 	} else {
+		// 		fmt.Printf("[%s] Reject: %s %s %s\n", who, rej.CodeName(), rej.Reason, hex.EncodeToString(rej.Data))
+		// 	}
+
+		// default:
+		// 	_, err := conn.Write(
+		// 		protocol.EncodeMessage(protocol.TagReject, ns.privKey,
+		// 			protocol.EncodeReject(protocol.REJECT_TAG, "not supported", protocol.TagToBytes(tag))))
+		// 	if err != nil {
+		// 		log.Printf("failed to send message")
+		// 		return // drop connection
+		// 	}
+		// }
 	}
 }
 
 func (ns *netService) sendMyAddress(conn net.Conn) {
 	addr := protocol.AddressMsg{
-		Time:        uint32(time.Now().Unix()),
-		ServiceBits: 1,
-		Address:     ns.address.Host.To16(), // can be nil
-		Port:        ns.address.Port,
+		Time:    protocol.DogeNow(),
+		Address: ns.address.Host.To16(), // can return nil
+		Port:    ns.address.Port,
+		Channels: []protocol.Tag4CC{
+			protocol.ChannelIdentity,
+			protocol.ChannelB0rk,
+		},
+		Services: []protocol.Service{
+			{Tag: protocol.ServiceCore, Port: 22556, Data: ""},
+		},
 	}
-	copy(addr.Identity, ns.identPub)
-	conn.Write(protocol.EncodeMessage(protocol.AddrTag, ns.privKey, protocol.EncodeAddrMsg(addr)))
+	addr.Owner = ns.identPub // shared!
+	conn.Write(protocol.EncodeMessage(protocol.ChannelDoge, protocol.TagAddress, ns.privKey, addr.Encode()))
 }
