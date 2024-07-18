@@ -1,4 +1,4 @@
-package gossip
+package service
 
 import (
 	"bufio"
@@ -15,10 +15,11 @@ import (
 
 type peerConn struct {
 	ns       *netService
+	conn     net.Conn
 	address  spec.Address
 	store    spec.Store
 	receive  map[protocol.Tag4CC]chan protocol.Message
-	send     chan []byte
+	send     chan protocol.Message
 	signKey  protocol.PrivKey
 	identPub protocol.PubKey
 }
@@ -26,41 +27,44 @@ type peerConn struct {
 func newPeer(conn net.Conn, address spec.Address, ns *netService, priv protocol.PrivKey, pub protocol.PubKey) *peerConn {
 	peer := &peerConn{
 		ns:       ns,
+		conn:     conn,
 		address:  address,
 		store:    ns.store,
 		receive:  make(map[protocol.Tag4CC]chan protocol.Message),
-		send:     make(chan []byte),
+		send:     make(chan protocol.Message),
 		signKey:  priv,
 		identPub: pub,
 	}
-	go peer.receiveFromPeer(conn)
-	go peer.sendToPeer(conn)
 	return peer
 }
 
+func (peer *peerConn) start() {
+	go peer.receiveFromPeer()
+	go peer.sendToPeer()
+}
+
 // goroutine
-func (peer *peerConn) receiveFromPeer(conn net.Conn) {
+func (peer *peerConn) receiveFromPeer() {
 	who := peer.address.String()
+	conn := peer.conn
 	reader := bufio.NewReader(conn)
 	peer.sendMyAddress(conn)
-	for {
+	for !peer.ns.Stopping() {
 		msg, err := protocol.ReadMessage(reader)
 		if err != nil {
-			log.Printf("[%s] bad message: %v", who, err)
-			peer.ns.closeConn(conn)
+			log.Printf("[%s] cannot receive from peer: %v", who, err)
+			peer.ns.closePeer(peer)
 			return
 		}
-		// forward received message to the channel owner
-		if channel, ok := peer.receive[msg.Chan]; ok {
-			channel <- msg
-		} else {
+		// forward received message to channel owners
+		if !peer.ns.forwardToHandlers(msg) {
 			// send a reject on the channel, with message tag as data
 			_, err := conn.Write(
 				protocol.EncodeMessage(msg.Chan, protocol.TagReject, peer.signKey,
 					protocol.EncodeReject(protocol.REJECT_CHAN, "", msg.Tag.Bytes())))
 			if err != nil {
 				log.Printf("[%s] failed to send reject: %s", who, msg.Tag)
-				peer.ns.closeConn(conn)
+				peer.ns.closePeer(peer)
 				return
 			}
 		}
@@ -68,21 +72,22 @@ func (peer *peerConn) receiveFromPeer(conn net.Conn) {
 }
 
 // goroutine
-func (peer *peerConn) sendToPeer(conn net.Conn) {
+func (peer *peerConn) sendToPeer() {
 	who := peer.address.String()
-	for {
+	conn := peer.conn
+	for !peer.ns.Stopping() {
 		select {
 		case msg := <-peer.send:
-			// forward the message to the peer
-			_, err := conn.Write(msg)
+			// forward the raw message to the peer
+			err := protocol.ForwardMessage(conn, msg)
 			if err != nil {
-				log.Printf("[%s] cannot send: %v", who, err)
-				peer.ns.closeConn(conn)
+				log.Printf("[%s] cannot send to peer: %v", who, err)
+				peer.ns.closePeer(peer)
 				return
 			}
 		case <-peer.ns.Context.Done():
 			// shutting down
-			peer.ns.closeConn(conn)
+			peer.ns.closePeer(peer)
 			return
 		}
 	}

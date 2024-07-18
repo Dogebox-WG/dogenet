@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"bufio"
 	"crypto/ed25519"
 	"encoding/binary"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 )
 
 const MaxMsgSize = 0x1000080 // 16MB (block size is 1MB; 16x=16MB + 128 header 0x80)
+const HeaderSize = 108       // size of Message header
 
 // well-known channels
 var ChannelDoge = makeTag4CC("Doge")
@@ -40,13 +40,14 @@ type Message struct { // 108 bytes fixed size header
 	PubKey    []byte // [32]byte
 	Signature []byte // [64]byte
 	Payload   []byte // ... message payload
+	RawHdr    []byte // attached raw header
 }
 
 func EncodeMessage(channel Tag4CC, tag Tag4CC, privkey PrivKey, payload []byte) []byte {
 	if len(payload) > MaxMsgSize {
 		panic("EncodeMessage: message too large: " + strconv.Itoa(len(payload)))
 	}
-	msg := make([]byte, 108+len(payload))
+	msg := make([]byte, HeaderSize+len(payload))
 	binary.BigEndian.PutUint32(msg[0:4], uint32(channel))
 	binary.BigEndian.PutUint32(msg[4:8], uint32(tag))
 	binary.LittleEndian.PutUint32(msg[8:12], uint32(len(payload)))
@@ -56,30 +57,31 @@ func EncodeMessage(channel Tag4CC, tag Tag4CC, privkey PrivKey, payload []byte) 
 	return msg
 }
 
-func DecodeMessage(buf *[108]byte) (msg Message) {
+func DecodeHeader(buf []byte) (msg Message) {
 	msg.Chan = Tag4CC(binary.BigEndian.Uint32(buf[0:4]))
 	msg.Tag = Tag4CC(binary.BigEndian.Uint32(buf[4:8]))
 	msg.Size = binary.LittleEndian.Uint32(buf[8:12])
 	msg.PubKey = buf[12:44]     // [32]byte
 	msg.Signature = buf[44:108] // [64]byte
+	msg.RawHdr = buf[:]         // for message forwarding
 	return
 }
 
-func ReadMessage(reader *bufio.Reader) (Message, error) {
+func ReadMessage(reader io.Reader) (Message, error) {
 	// Read the message header
-	buf := [108]byte{}
-	n, err := io.ReadFull(reader, buf[:])
+	buf := [HeaderSize]byte{}
+	n, err := io.ReadAtLeast(reader, buf[:], HeaderSize)
 	if err != nil {
 		return Message{}, fmt.Errorf("short header: received %d bytes: %v", n, err)
 	}
 	// Decode the header
-	msg := DecodeMessage(&buf)
+	msg := DecodeHeader(buf[:])
 	if msg.Size > MaxMsgSize {
 		return Message{}, fmt.Errorf("message too large: [%s] size is %d bytes", msg.Tag, msg.Size)
 	}
 	// Read the message payload
 	msg.Payload = make([]byte, msg.Size)
-	n, err = io.ReadFull(reader, msg.Payload)
+	n, err = io.ReadAtLeast(reader, msg.Payload, int(msg.Size))
 	if err != nil {
 		return Message{}, fmt.Errorf("short payload: [%s] received %d of %d bytes: %v", msg.Tag, n, msg.Size, err)
 	}
@@ -88,6 +90,19 @@ func ReadMessage(reader *bufio.Reader) (Message, error) {
 		return Message{}, fmt.Errorf("incorrect signature: [%s] message", msg.Tag)
 	}
 	return msg, nil
+}
+
+func ForwardMessage(conn io.Writer, msg Message) error {
+	// forward the raw message to the peer
+	_, err := conn.Write(msg.RawHdr)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Write(msg.Payload)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func makeTag4CC(tag string) Tag4CC {

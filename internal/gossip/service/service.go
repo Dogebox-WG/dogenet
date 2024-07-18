@@ -1,4 +1,4 @@
-package gossip
+package service
 
 import (
 	"crypto/ed25519"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -15,18 +16,22 @@ import (
 )
 
 const IdealPeers = 8
+const ProtocolSocket = "/tmp/dogenet.sock"
 
 type netService struct {
 	governor.ServiceCtx
 	address     spec.Address
 	mutex       sync.Mutex
 	listner     net.Listener
+	socket      net.Listener
 	channels    map[protocol.Tag4CC]chan protocol.Message
 	store       spec.Store
 	privKey     protocol.PrivKey
 	identPub    protocol.PubKey
 	remotePort  uint16
 	connections map[net.Conn]spec.Address
+	peers       []*peerConn
+	handlers    []*handlerConn
 }
 
 func New(address spec.Address, remotePort uint16, store spec.Store) governor.Service {
@@ -60,6 +65,7 @@ func (ns *netService) Run() {
 	ns.mutex.Lock()
 	ns.listner = listner
 	ns.mutex.Unlock()
+	go ns.acceptHandlers()
 	go ns.attractPeers()
 	defer listner.Close()
 	for {
@@ -72,9 +78,35 @@ func (ns *netService) Run() {
 		if err != nil {
 			log.Printf("[%s] no remote address for inbound peer: %v", who, err)
 		}
-		if ns.trackConn(conn, remote) {
-			newPeer(conn, remote, ns, ns.privKey, ns.identPub)
+		peer := newPeer(conn, remote, ns, ns.privKey, ns.identPub)
+		if ns.trackPeer(peer) {
+			peer.start()
 		} else { // Stop was called
+			conn.Close()
+			return
+		}
+	}
+}
+
+// goroutine
+func (ns *netService) acceptHandlers() {
+	who := "accept-handlers"
+	var err error
+	ns.socket, err = net.Listen("unix", ProtocolSocket)
+	if err != nil {
+		log.Printf("[%s] cannot create unix socket %s: %v", who, ProtocolSocket, err)
+		return
+	}
+	for !ns.Stopping() {
+		// Accept an incoming connection.
+		conn, err := ns.socket.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		hand := newHandler(conn, ns)
+		if ns.trackHandler(hand) {
+			hand.start()
+		} else {
 			conn.Close()
 			return
 		}
@@ -95,8 +127,9 @@ func (ns *netService) attractPeers() {
 				if err != nil {
 					log.Printf("[%s] connect failed: %v", who, err)
 				} else {
-					if ns.trackConn(conn, addr) {
-						newPeer(conn, addr, ns, ns.privKey, ns.identPub)
+					peer := newPeer(conn, addr, ns, ns.privKey, ns.identPub)
+					if ns.trackPeer(peer) {
+						peer.start()
 						continue
 					} else { // Stop was called
 						conn.Close()
@@ -110,29 +143,37 @@ func (ns *netService) attractPeers() {
 	}
 }
 
+// called from attractPeers
 func (ns *netService) countPeers() int {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	return len(ns.connections)
+	return len(ns.peers)
 }
 
+// called from attractPeers
 func (ns *netService) havePeer(remote spec.Address) bool {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	for _, addr := range ns.connections {
-		if addr.Host.Equal(remote.Host) && addr.Port == remote.Port {
+	for _, peer := range ns.peers {
+		if peer.address.Host.Equal(remote.Host) && peer.address.Port == remote.Port {
 			return true
 		}
 	}
 	return false
 }
 
+// called from any
 func (ns *netService) Stop() {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	// stop accepting connections
+	// stop accepting network connections
 	if ns.listner != nil {
 		ns.listner.Close()
+	}
+	// stop accepting handler connections
+	if ns.socket != nil {
+		ns.socket.Close()
+		os.Remove(ProtocolSocket)
 	}
 	// close all active connections
 	for c := range ns.connections {
@@ -140,20 +181,89 @@ func (ns *netService) Stop() {
 	}
 }
 
-func (ns *netService) closeConn(conn net.Conn) {
-	conn.Close()
+// called from any
+func (ns *netService) forwardToPeers(msg protocol.Message) {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	delete(ns.connections, conn)
+	for _, peer := range ns.peers {
+		// non-blocking send to peer
+		select {
+		case peer.send <- msg:
+		default:
+		}
+	}
 }
 
-func (ns *netService) trackConn(conn net.Conn, addr spec.Address) bool {
+// called from any
+func (ns *netService) forwardToHandlers(msg protocol.Message) bool {
+	ns.mutex.Lock()
+	defer ns.mutex.Unlock()
+	found := false
+	for _, hand := range ns.handlers {
+		if hand.channel == msg.Chan {
+			// non-blocking send to handler
+			select {
+			case hand.send <- msg:
+				// after accepting this message into the queue,
+				// the handler becomes responsible for sending a reject
+				// (however there can be multiple handlers!)
+				found = true
+			default:
+			}
+		}
+	}
+	return found
+}
+
+// called from any
+func (ns *netService) closePeer(peer *peerConn) {
+	peer.conn.Close()
+	ns.mutex.Lock()
+	defer ns.mutex.Unlock()
+	for i, p := range ns.peers {
+		if p == peer {
+			// remove from unordered array
+			ns.peers[i] = ns.peers[len(ns.peers)-1]
+			ns.peers = ns.peers[:len(ns.peers)-1]
+			break
+		}
+	}
+}
+
+// called from any
+func (ns *netService) closeHandler(hand *handlerConn) {
+	hand.conn.Close()
+	ns.mutex.Lock()
+	defer ns.mutex.Unlock()
+	for i, h := range ns.handlers {
+		if h == hand {
+			// remove from unordered array
+			ns.handlers[i] = ns.handlers[len(ns.handlers)-1]
+			ns.handlers = ns.handlers[:len(ns.handlers)-1]
+			break
+		}
+	}
+}
+
+// called from any
+func (ns *netService) trackPeer(peer *peerConn) bool {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 	if ns.Stopping() {
 		return false
 	}
-	ns.connections[conn] = addr
+	ns.peers = append(ns.peers, peer)
+	return true
+}
+
+// called from any
+func (ns *netService) trackHandler(hand *handlerConn) bool {
+	ns.mutex.Lock()
+	defer ns.mutex.Unlock()
+	if ns.Stopping() {
+		return false
+	}
+	ns.handlers = append(ns.handlers, hand)
 	return true
 }
 

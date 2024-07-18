@@ -16,6 +16,12 @@ import (
 	"github.com/dogeorg/dogenet/internal/spec"
 )
 
+// Nodes need to be indexed by channel,
+// so the peer can connect to enough nodes for each channel.
+
+// When a given channel is rarely used on the network,
+// the peer will end up seeking out those nodes to connect to.
+
 type NodeID = spec.NodeID
 type Address = spec.Address
 
