@@ -59,6 +59,7 @@ func (peer *peerConn) receiveFromPeer() {
 			return
 		}
 		// forward received message to channel owners
+		log.Printf("[%s] received from peer: %v %v", who, msg.Chan, msg.Tag)
 		if !peer.ns.forwardToHandlers(msg) {
 			// send a reject on the channel, with message tag as data
 			_, err := conn.Write(
@@ -81,6 +82,7 @@ func (peer *peerConn) sendToPeer() {
 		select {
 		case msg := <-peer.send:
 			// forward the raw message to the peer
+			log.Printf("[%s] sending to peer: %v %v", who, msg.Chan, msg.Tag)
 			err := dnet.ForwardMessage(conn, msg)
 			if err != nil {
 				log.Printf("[%s] cannot send to peer: %v", who, err)

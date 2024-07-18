@@ -148,6 +148,7 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.store.AddNetNode(pub, addr, time.Now().Unix(), 0)
+		log.Printf("added new peer to database: %v %v %v", pub, addr.Host, addr.Port)
 
 		// response
 		res, err := json.Marshal("OK")

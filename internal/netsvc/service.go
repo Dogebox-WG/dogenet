@@ -3,11 +3,13 @@ package netsvc
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rad/gossip/dnet"
@@ -40,6 +42,7 @@ func New(address spec.Address, remotePort uint16, store spec.Store) governor.Ser
 	if err != nil {
 		panic(fmt.Sprintf("cannot generate pubkey: %v", err))
 	}
+	log.Printf("Node PubKey is: %v", hex.EncodeToString(pub))
 	if remotePort == 0 {
 		remotePort = dnet.DogeNetDefaultPort
 	}
@@ -81,6 +84,7 @@ func (ns *netService) Run() {
 		}
 		peer := newPeer(conn, remote, ns, ns.privKey, ns.identPub)
 		if ns.trackPeer(peer) {
+			log.Printf("[%s] peer connected: %v", who, remote)
 			peer.start()
 		} else { // Stop was called
 			conn.Close()
@@ -107,6 +111,7 @@ func (ns *netService) acceptHandlers() {
 		}
 		hand := newHandler(conn, ns)
 		if ns.trackHandler(hand) {
+			log.Printf("[%s] handler connected.", who)
 			hand.start()
 		} else {
 			conn.Close()
@@ -202,7 +207,8 @@ func (ns *netService) forwardToHandlers(msg dnet.Message) bool {
 	defer ns.mutex.Unlock()
 	found := false
 	for _, hand := range ns.handlers {
-		if hand.channel == msg.Chan {
+		// check if the handler is listening on this channel
+		if uint32(msg.Chan) == atomic.LoadUint32(&hand.channel) {
 			// non-blocking send to handler
 			select {
 			case hand.send <- msg:
