@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/dogeorg/dogenet/internal/codec"
+	"rad/gossip/codec"
 )
 
 type InvType uint32

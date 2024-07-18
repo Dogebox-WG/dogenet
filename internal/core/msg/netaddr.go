@@ -1,6 +1,6 @@
 package msg
 
-import "github.com/dogeorg/dogenet/internal/codec"
+import "rad/gossip/codec"
 
 // NetAddr represents the structure of a network address
 type NetAddr struct {

@@ -1,4 +1,4 @@
-package service
+package netsvc
 
 import (
 	"crypto/ed25519"
@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dogeorg/dogenet/internal/gossip/protocol"
-	"github.com/dogeorg/dogenet/internal/governor"
+	"rad/gossip/dnet"
+	"rad/governor"
+
 	"github.com/dogeorg/dogenet/internal/spec"
 )
 
@@ -24,10 +25,10 @@ type netService struct {
 	mutex       sync.Mutex
 	listner     net.Listener
 	socket      net.Listener
-	channels    map[protocol.Tag4CC]chan protocol.Message
+	channels    map[dnet.Tag4CC]chan dnet.Message
 	store       spec.Store
-	privKey     protocol.PrivKey
-	identPub    protocol.PubKey
+	privKey     dnet.PrivKey
+	identPub    dnet.PubKey
 	remotePort  uint16
 	connections map[net.Conn]spec.Address
 	peers       []*peerConn
@@ -40,11 +41,11 @@ func New(address spec.Address, remotePort uint16, store spec.Store) governor.Ser
 		panic(fmt.Sprintf("cannot generate pubkey: %v", err))
 	}
 	if remotePort == 0 {
-		remotePort = spec.DogeNetDefaultPort
+		remotePort = dnet.DogeNetDefaultPort
 	}
 	return &netService{
 		address:     address,
-		channels:    make(map[protocol.Tag4CC]chan protocol.Message),
+		channels:    make(map[dnet.Tag4CC]chan dnet.Message),
 		store:       store,
 		privKey:     priv,
 		identPub:    pub,
@@ -92,6 +93,7 @@ func (ns *netService) Run() {
 func (ns *netService) acceptHandlers() {
 	who := "accept-handlers"
 	var err error
+	os.Remove(ProtocolSocket)
 	ns.socket, err = net.Listen("unix", ProtocolSocket)
 	if err != nil {
 		log.Printf("[%s] cannot create unix socket %s: %v", who, ProtocolSocket, err)
@@ -182,7 +184,7 @@ func (ns *netService) Stop() {
 }
 
 // called from any
-func (ns *netService) forwardToPeers(msg protocol.Message) {
+func (ns *netService) forwardToPeers(msg dnet.Message) {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 	for _, peer := range ns.peers {
@@ -195,7 +197,7 @@ func (ns *netService) forwardToPeers(msg protocol.Message) {
 }
 
 // called from any
-func (ns *netService) forwardToHandlers(msg protocol.Message) bool {
+func (ns *netService) forwardToHandlers(msg dnet.Message) bool {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 	found := false

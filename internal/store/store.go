@@ -202,6 +202,7 @@ func (t *NetMap) UpdateCoreTime(address Address) {
 	defer t.mu.Unlock()
 	if node, found := t.state.Core.Nodes[address.NodeID()]; found {
 		node.Time = time.Now().Unix()
+		t.state.Core.Nodes[address.NodeID()] = node // ugh
 	}
 }
 
@@ -210,6 +211,7 @@ func (t *NetMap) UpdateNetTime(key spec.PubKey) {
 	defer t.mu.Unlock()
 	if node, found := t.state.Net.Nodes[key.NodeID()]; found {
 		node.Time = time.Now().Unix()
+		t.state.Net.Nodes[key.NodeID()] = node // ugh
 	}
 }
 

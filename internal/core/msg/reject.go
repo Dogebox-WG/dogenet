@@ -1,6 +1,6 @@
 package msg
 
-import "github.com/dogeorg/dogenet/internal/codec"
+import "rad/gossip/codec"
 
 type RejectCode int
 

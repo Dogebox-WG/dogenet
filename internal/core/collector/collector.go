@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"rad/gossip/dnet"
+	"rad/governor"
+
 	"github.com/dogeorg/dogenet/internal/core/msg"
-	"github.com/dogeorg/dogenet/internal/governor"
 	"github.com/dogeorg/dogenet/internal/spec"
 )
 
@@ -129,7 +131,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 		if foundNet >= 0 {
 			log.Printf("[%s] found @net in node agent string: %v", who, nodeAddr)
 			// check for custom port
-			port := spec.DogeNetDefaultPort
+			port := dnet.DogeNetDefaultPort
 			if strings.HasPrefix(version.Agent[foundNet+4:], ":") {
 				var newport int
 				_, err := fmt.Sscan(version.Agent[foundNet+5:], &newport)

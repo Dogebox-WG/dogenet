@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dogeorg/dogenet/internal/dogeicon"
-	"github.com/dogeorg/dogenet/internal/governor"
+	"rad/governor"
+
+	"rad/gossip/icon"
+
 	"github.com/dogeorg/dogenet/internal/spec"
 )
 
@@ -103,7 +105,7 @@ func (a *WebAPI) compress(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("Options: %v", options)
 
-		_, res := dogeicon.Compress(body, stride, options)
+		_, res := icon.Compress(body, stride, options)
 
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
@@ -115,8 +117,8 @@ func (a *WebAPI) compress(w http.ResponseWriter, r *http.Request) {
 }
 
 type AddPeer struct {
-	Key  string `json:key`
-	Addr string `json:addr`
+	Key  string `json:"key"`
+	Addr string `json:"addr"`
 }
 
 func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
