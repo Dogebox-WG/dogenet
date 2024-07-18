@@ -62,14 +62,14 @@ func (peer *peerConn) receiveFromPeer() {
 		log.Printf("[%s] received from peer: %v %v", who, msg.Chan, msg.Tag)
 		if !peer.ns.forwardToHandlers(msg) {
 			// send a reject on the channel, with message tag as data
-			_, err := conn.Write(
-				dnet.EncodeMessage(msg.Chan, node.TagReject, peer.signKey,
-					node.EncodeReject(node.REJECT_CHAN, "", msg.Tag.Bytes())))
-			if err != nil {
-				log.Printf("[%s] failed to send reject: %s", who, msg.Tag)
-				peer.ns.closePeer(peer)
-				return
-			}
+			// _, err := conn.Write(
+			// 	dnet.EncodeMessage(msg.Chan, node.TagReject, peer.signKey,
+			// 		node.EncodeReject(node.REJECT_CHAN, "", msg.Tag.Bytes())))
+			// if err != nil {
+			log.Printf("[%s] no handlers on channel: %s", who, msg.Chan)
+			// 	peer.ns.closePeer(peer)
+			// 	return
+			// }
 		}
 	}
 }
