@@ -5,35 +5,40 @@ import (
 	"log"
 	"net"
 	"os"
-	"rad/gossip/dnet"
 	"strconv"
 	"time"
 
-	"rad/governor"
+	"code.dogecoin.org/gossip/dnet"
 
-	"github.com/dogeorg/dogenet/internal/core/collector"
-	"github.com/dogeorg/dogenet/internal/netsvc"
-	"github.com/dogeorg/dogenet/internal/spec"
-	"github.com/dogeorg/dogenet/internal/store"
-	"github.com/dogeorg/dogenet/internal/web"
+	"code.dogecoin.org/governor"
+
+	"code.dogecoin.org/dogenet/internal/core/collector"
+	"code.dogecoin.org/dogenet/internal/netsvc"
+	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/internal/store"
+	"code.dogecoin.org/dogenet/internal/web"
 )
 
 const DogeNetConnections = 4
 const CoreNodeListeners = 1
+const StoreFilename = "storage/dogenet.db"
 
 func DogeNetMain(localNode string, localPort uint16, remotePort uint16, webPort uint16) {
 	// load the previously saved state.
-	db := store.LoadStore()
-	gov := governor.New().CatchSignals().Restart(1 * time.Second)
+	db, err := store.NewSQLiteStore(StoreFilename)
+	if err != nil {
+		log.Println("Cannot open database:", StoreFilename)
+		os.Exit(1)
+	}
 
-	// periodically save the network map.
-	gov.Add("map-saver", store.NewStoreSaver(db))
+	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
 	if localPort == 0 {
 		localPort = dnet.DogeNetDefaultPort
 	}
-	gov.Add("gossip", netsvc.New(spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort}, remotePort, db))
+	publicAddr := spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort} // XXX
+	gov.Add("gossip", netsvc.New(spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort}, publicAddr, db))
 
 	// stay connected to local node if specified.
 	if localNode != "" {
@@ -61,8 +66,6 @@ func DogeNetMain(localNode string, localPort uint16, remotePort uint16, webPort 
 	// run services until interrupted.
 	gov.Start()
 	gov.WaitForShutdown()
-	fmt.Println("writing the netmap database…")
-	db.Persist(store.GobFilePath)
 	fmt.Println("finished.")
 }
 

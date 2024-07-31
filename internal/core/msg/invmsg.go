@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"rad/gossip/codec"
+	"code.dogecoin.org/gossip/codec"
 )
 
 type InvType uint32

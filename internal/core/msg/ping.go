@@ -1,6 +1,6 @@
 package msg
 
-import "rad/gossip/codec"
+import "code.dogecoin.org/gossip/codec"
 
 type PingMsg struct {
 	Nonce uint64 // random nonce

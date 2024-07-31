@@ -1,6 +1,6 @@
 package msg
 
-import "rad/gossip/codec"
+import "code.dogecoin.org/gossip/codec"
 
 // Services bit flags:
 const (

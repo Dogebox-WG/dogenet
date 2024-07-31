@@ -12,8 +12,9 @@ type CoreNode struct {
 }
 
 type NetNode struct {
-	PubKey   string `json:"pubkey"`
-	Address  string `json:"address"`
-	Time     int64  `json:"time"`
-	Services uint64 `json:"services"`
+	PubKey   string   `json:"pubkey"`
+	Address  string   `json:"address"`
+	Time     int64    `json:"time"`
+	Channels []string `json:"channels"`
+	Identity string   `json:"identity"`
 }

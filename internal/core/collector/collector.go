@@ -3,17 +3,14 @@ package collector
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
-	"rad/gossip/dnet"
-	"rad/governor"
+	"code.dogecoin.org/governor"
 
-	"github.com/dogeorg/dogenet/internal/core/msg"
-	"github.com/dogeorg/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/internal/core/msg"
+	"code.dogecoin.org/dogenet/internal/spec"
 )
 
 // Current Core Node version
@@ -126,22 +123,6 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 	// successful connection: update the node's timestamp.
 	if !c.isLocal {
 		c.store.UpdateCoreTime(nodeAddr)
-		// check if agent string contains @net or @net:<port>
-		foundNet := strings.Index(version.Agent, "@net")
-		if foundNet >= 0 {
-			log.Printf("[%s] found @net in node agent string: %v", who, nodeAddr)
-			// check for custom port
-			port := dnet.DogeNetDefaultPort
-			if strings.HasPrefix(version.Agent[foundNet+4:], ":") {
-				var newport int
-				_, err := fmt.Sscan(version.Agent[foundNet+5:], &newport)
-				if err == nil && newport >= 0 && newport < 65536 { // only if valid
-					port = uint16(newport)
-				}
-			}
-			// add the doge-net node address
-			c.store.NewNetNode(spec.Address{Host: nodeAddr.Host, Port: port}, time.Now().Unix())
-		}
 	}
 
 	addresses := 0
@@ -173,7 +154,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 			for _, a := range addr.AddrList {
 				// fmt.Println("• ", net.IP(a.Address), a.Port, "svc", a.Services, "ts", a.Time)
 				if int64(a.Time) >= keepAfter {
-					c.store.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, int64(a.Time), a.Services, false)
+					c.store.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, int64(a.Time), a.Services)
 					kept++
 				}
 			}

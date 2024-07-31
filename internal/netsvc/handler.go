@@ -8,9 +8,9 @@ import (
 	"net"
 	"sync/atomic"
 
-	"rad/gossip/dnet"
+	"code.dogecoin.org/gossip/dnet"
 
-	"github.com/dogeorg/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/internal/spec"
 )
 
 type handlerConn struct {

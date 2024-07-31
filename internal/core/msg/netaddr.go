@@ -1,6 +1,6 @@
 package msg
 
-import "rad/gossip/codec"
+import "code.dogecoin.org/gossip/codec"
 
 // NetAddr represents the structure of a network address
 type NetAddr struct {

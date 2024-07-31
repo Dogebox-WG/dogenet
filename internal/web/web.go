@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"time"
 
-	"rad/governor"
+	"code.dogecoin.org/governor"
 
-	"rad/gossip/icon"
+	"code.dogecoin.org/gossip/icon"
 
-	"github.com/dogeorg/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/internal/spec"
 )
 
 func New(store spec.Store, bind string, port int) governor.Service {
@@ -147,8 +147,10 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid peer address: %v", err), http.StatusBadRequest)
 			return
 		}
-		a.store.AddNetNode(pub, addr, time.Now().Unix(), 0)
-		log.Printf("added new peer to database: %v %v %v", pub, addr.Host, addr.Port)
+		// XXX: does this add a pinned node?
+		// XXX: does this add a new node to be scanned?
+		// a.store.AddNetNode(spec.PubKey(pub), addr, time.Now().Unix(), []dnet.Tag4CC{}, []byte{})
+		log.Printf("FIXME add new peer: %v %v %v", pub, addr.Host, addr.Port)
 
 		// response
 		res, err := json.Marshal("OK")

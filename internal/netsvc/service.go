@@ -1,8 +1,7 @@
 package netsvc
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -12,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rad/gossip/dnet"
-	"rad/governor"
+	"code.dogecoin.org/gossip/dnet"
+	"code.dogecoin.org/governor"
 
-	"github.com/dogeorg/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/internal/spec"
 )
 
 const IdealPeers = 8
@@ -23,44 +22,46 @@ const ProtocolSocket = "/tmp/dogenet.sock"
 
 type netService struct {
 	governor.ServiceCtx
-	address     spec.Address
+	bindAddr    spec.Address // bind-to address on THIS node
+	pubAddr     spec.Address // public address of THIS node
 	mutex       sync.Mutex
 	listner     net.Listener
 	socket      net.Listener
 	channels    map[dnet.Tag4CC]chan dnet.Message
 	store       spec.Store
-	privKey     dnet.PrivKey
-	identPub    dnet.PubKey
-	remotePort  uint16
+	nodeKey     dnet.KeyPair
+	idenPub     dnet.PubKey
 	connections map[net.Conn]spec.Address
 	peers       []*peerConn
 	handlers    []*handlerConn
 }
 
-func New(address spec.Address, remotePort uint16, store spec.Store) governor.Service {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+func New(bindAddr spec.Address, pubAddr spec.Address, store spec.Store) governor.Service {
+	nodeKey, err := dnet.GenerateKeyPair()
 	if err != nil {
-		panic(fmt.Sprintf("cannot generate pubkey: %v", err))
+		panic(fmt.Sprintf("cannot generate node keypair: %v", err))
 	}
-	log.Printf("Node PubKey is: %v", hex.EncodeToString(pub))
-	if remotePort == 0 {
-		remotePort = dnet.DogeNetDefaultPort
+	idenKey, err := dnet.GenerateKeyPair()
+	if err != nil {
+		panic(fmt.Sprintf("cannot generate iden keypair: %v", err))
 	}
+	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub))
+	log.Printf("Iden PubKey is: %v", hex.EncodeToString(idenKey.Pub))
 	return &netService{
-		address:     address,
+		bindAddr:    bindAddr,
+		pubAddr:     pubAddr,
 		channels:    make(map[dnet.Tag4CC]chan dnet.Message),
 		store:       store,
-		privKey:     priv,
-		identPub:    pub,
-		remotePort:  remotePort,
+		nodeKey:     nodeKey,
+		idenPub:     idenKey.Pub,
 		connections: make(map[net.Conn]spec.Address),
 	}
 }
 
 func (ns *netService) Run() {
 	var lc net.ListenConfig
-	who := ns.address.String()
-	listner, err := lc.Listen(ns.Context, "tcp", ns.address.String())
+	who := ns.bindAddr.String()
+	listner, err := lc.Listen(ns.Context, "tcp", ns.bindAddr.String())
 	if err != nil {
 		log.Printf("[%s] cannot listen on `%v`: %v", ns.ServiceName, who, err)
 		return
@@ -82,7 +83,7 @@ func (ns *netService) Run() {
 		if err != nil {
 			log.Printf("[%s] no remote address for inbound peer: %v", who, err)
 		}
-		peer := newPeer(conn, remote, ns, ns.privKey, ns.identPub)
+		peer := newPeer(conn, remote, nil, ns) // inbound connection (no peerPub)
 		if ns.trackPeer(peer) {
 			log.Printf("[%s] peer connected: %v", who, remote)
 			peer.start()
@@ -125,16 +126,16 @@ func (ns *netService) attractPeers() {
 	who := "attract-peers"
 	for !ns.Stopping() {
 		if ns.countPeers() < IdealPeers {
-			addr := ns.store.ChooseNetNode()
-			log.Printf("[%s] choosing peer: %v", who, addr)
-			if addr.IsValid() && !ns.havePeer(addr) {
+			node := ns.store.ChooseNetNode()
+			log.Printf("[%s] choosing peer: %v [%v]", who, node.Addr, hex.EncodeToString(node.PubKey))
+			if node.Addr.IsValid() && !ns.havePeer(node.PubKey) {
 				// attempt to connect to the peer
 				d := net.Dialer{Timeout: 30 * time.Second}
-				conn, err := d.DialContext(ns.Context, "tcp", addr.String())
+				conn, err := d.DialContext(ns.Context, "tcp", node.Addr.String())
 				if err != nil {
 					log.Printf("[%s] connect failed: %v", who, err)
 				} else {
-					peer := newPeer(conn, addr, ns, ns.privKey, ns.identPub)
+					peer := newPeer(conn, node.Addr, node.PubKey, ns) // outbound connection (have PeerPub)
 					if ns.trackPeer(peer) {
 						peer.start()
 						continue
@@ -158,11 +159,11 @@ func (ns *netService) countPeers() int {
 }
 
 // called from attractPeers
-func (ns *netService) havePeer(remote spec.Address) bool {
+func (ns *netService) havePeer(remote dnet.PubKey) bool {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 	for _, peer := range ns.peers {
-		if peer.address.Host.Equal(remote.Host) && peer.address.Port == remote.Port {
+		if peer.peerPub != nil && bytes.Equal(peer.peerPub, remote) {
 			return true
 		}
 	}
