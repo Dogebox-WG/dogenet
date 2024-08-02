@@ -234,7 +234,8 @@ func (s SQLiteStore) SampleCoreNodes() []Address {
 	return []Address{}
 }
 
-func (s SQLiteStore) AddNetNode(pubkey spec.PubKey, address Address, time int64, channels []dnet.Tag4CC, msg []byte) {
+func (s SQLiteStore) AddNetNode(pubkey spec.PubKey, address Address, time int64, owner spec.PubKey, channels []dnet.Tag4CC, msg []byte) (changed bool, err error) {
+	return false, nil
 }
 
 func (s SQLiteStore) UpdateNetTime(key spec.PubKey) {

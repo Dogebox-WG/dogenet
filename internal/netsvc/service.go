@@ -245,29 +245,29 @@ func (ns *NetService) Stop() {
 }
 
 // called from any
-func (ns *NetService) forwardToPeers(msg dnet.Message) {
+func (ns *NetService) forwardToPeers(rawMsg []byte) {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 	for _, peer := range ns.peers {
 		// non-blocking send to peer
 		select {
-		case peer.send <- msg:
+		case peer.send <- rawMsg:
 		default:
 		}
 	}
 }
 
 // called from any
-func (ns *NetService) forwardToHandlers(msg dnet.Message) bool {
+func (ns *NetService) forwardToHandlers(channel dnet.Tag4CC, rawMsg []byte) bool {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 	found := false
 	for _, hand := range ns.handlers {
 		// check if the handler is listening on this channel
-		if uint32(msg.Chan) == atomic.LoadUint32(&hand.channel) {
+		if uint32(channel) == atomic.LoadUint32(&hand.channel) {
 			// non-blocking send to handler
 			select {
-			case hand.send <- msg:
+			case hand.send <- rawMsg:
 				// after accepting this message into the queue,
 				// the handler becomes responsible for sending a reject
 				// (however there can be multiple handlers!)

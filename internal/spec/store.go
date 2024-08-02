@@ -22,7 +22,7 @@ type Store interface {
 	ChooseCoreNode() Address
 	SampleCoreNodes() []Address
 	// dogenet nodes
-	AddNetNode(pubkey PubKey, address Address, time int64, channels []dnet.Tag4CC, msg []byte)
+	AddNetNode(pubkey PubKey, address Address, time int64, owner PubKey, channels []dnet.Tag4CC, msg []byte) (changed bool, err error)
 	UpdateNetTime(key PubKey)
 	ChooseNetNode() NodeInfo
 	SampleNetNodes() []NodeInfo
