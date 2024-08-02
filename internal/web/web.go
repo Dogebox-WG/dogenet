@@ -7,26 +7,27 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
 
 	"code.dogecoin.org/governor"
 
+	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/gossip/icon"
 
 	"code.dogecoin.org/dogenet/internal/spec"
 )
 
-func New(store spec.Store, bind string, port int) governor.Service {
+func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Service {
 	mux := http.NewServeMux()
 	a := &WebAPI{
 		store: store,
 		srv: http.Server{
-			Addr:    net.JoinHostPort(bind, strconv.Itoa(port)),
+			Addr:    bind.String(),
 			Handler: mux,
 		},
+		netSvc: netSvc,
 	}
 	mux.HandleFunc("/nodes", a.getNodes)
 	mux.HandleFunc("/compress", a.compress)
@@ -40,10 +41,12 @@ func New(store spec.Store, bind string, port int) governor.Service {
 
 type WebAPI struct {
 	governor.ServiceCtx
-	store spec.Store
-	srv   http.Server
+	store  spec.Store
+	srv    http.Server
+	netSvc spec.NetSvc
 }
 
+// called on any
 func (a *WebAPI) Stop() {
 	// new goroutine because Shutdown() blocks
 	go func() {
@@ -54,6 +57,7 @@ func (a *WebAPI) Stop() {
 	}()
 }
 
+// goroutine
 func (a *WebAPI) Run() {
 	log.Printf("HTTP server listening on: %v\n", a.srv.Addr)
 	if err := a.srv.ListenAndServe(); err != http.ErrServerClosed { // blocking call
@@ -142,15 +146,14 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid key: %v", err), http.StatusBadRequest)
 			return
 		}
-		addr, err := spec.ParseAddress(to.Addr)
+		addr, err := dnet.ParseAddress(to.Addr)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("invalid peer address: %v", err), http.StatusBadRequest)
 			return
 		}
-		// XXX: does this add a pinned node?
-		// XXX: does this add a new node to be scanned?
-		// a.store.AddNetNode(spec.PubKey(pub), addr, time.Now().Unix(), []dnet.Tag4CC{}, []byte{})
-		log.Printf("FIXME add new peer: %v %v %v", pub, addr.Host, addr.Port)
+		// attempt to connect to the peer (soonish)
+		a.netSvc.AddPeer(pub, addr)
+		log.Printf("added peer: %v %v %v", hex.EncodeToString(pub), addr.Host, addr.Port)
 
 		// response
 		res, err := json.Marshal("OK")

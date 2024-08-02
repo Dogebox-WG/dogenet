@@ -55,7 +55,6 @@ CREATE TABLE IF NOT EXISTS node (
 );
 CREATE INDEX IF NOT EXISTS node_time_i ON node (time);
 CREATE INDEX IF NOT EXISTS node_address_i ON node (address);
-CREATE INDEX IF NOT EXISTS node_isnew_i ON node (isnew);
 CREATE TABLE IF NOT EXISTS chan (
 	node INTEGER NOT NULL,
 	chan INTEGER NOT NULL,
@@ -113,7 +112,7 @@ func (s SQLiteStore) NodeKey() (pub spec.PubKey, priv spec.PrivKey) {
 }
 
 func (s SQLiteStore) CoreStats() (mapSize int, newNodes int) {
-	row := s.db.QueryRow("SELECT COUNT(core) AS num FROM core UNION SELECT COUNT(core) AS isnew FROM node WHERE isnew=TRUE")
+	row := s.db.QueryRow("WITH t AS (SELECT COUNT(address) AS num, 1 AS rn FROM core), u AS (SELECT COUNT(address) AS isnew, 1 AS rn FROM core WHERE isnew=TRUE) SELECT t.num, u.isnew FROM t INNER JOIN u ON t.rn=u.rn")
 	var num, isnew int
 	err := row.Scan(&num, &isnew)
 	if err != nil {
@@ -126,9 +125,9 @@ func (s SQLiteStore) CoreStats() (mapSize int, newNodes int) {
 }
 
 func (s SQLiteStore) NetStats() (mapSize int, newNodes int) {
-	row := s.db.QueryRow("SELECT COUNT(node) AS num FROM node UNION SELECT COUNT(node) AS isnew FROM node WHERE isnew=TRUE")
+	row := s.db.QueryRow("SELECT COUNT(key) AS num FROM node")
 	var num, isnew int
-	err := row.Scan(&num, &isnew)
+	err := row.Scan(&num)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.Printf("[Store] NodeStats: %v", err)

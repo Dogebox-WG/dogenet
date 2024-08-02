@@ -48,6 +48,7 @@ func (c *Collector) Stop() {
 	}
 }
 
+// goroutine
 func (c *Collector) Run() {
 	for {
 		// choose the next node to connect to
@@ -125,6 +126,9 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 		c.store.UpdateCoreTime(nodeAddr)
 	}
 
+	dbSize, newLen := c.store.CoreStats()
+	fmt.Printf("[%s] %d in DB, %d new\n", who, dbSize, newLen)
+
 	addresses := 0
 	for {
 		cmd, payload, err := msg.ReadMessage(reader)
@@ -158,8 +162,8 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 					kept++
 				}
 			}
-			mapSize, newLen := c.store.CoreStats()
-			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in map\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), mapSize)
+			dbSize, newLen := c.store.CoreStats()
+			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in DB\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), dbSize)
 			addresses += len(addr.AddrList)
 			if addresses >= 1001 {
 				// done: try the next node (or reconnect to local node)

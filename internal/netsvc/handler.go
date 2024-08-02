@@ -14,7 +14,7 @@ import (
 )
 
 type handlerConn struct {
-	ns      *netService
+	ns      *NetService
 	conn    net.Conn
 	channel uint32 // for atomic.Load
 	store   spec.Store
@@ -23,7 +23,7 @@ type handlerConn struct {
 	name    string
 }
 
-func newHandler(conn net.Conn, ns *netService) *handlerConn {
+func newHandler(conn net.Conn, ns *NetService) *handlerConn {
 	hand := &handlerConn{
 		ns:      ns,
 		conn:    conn,

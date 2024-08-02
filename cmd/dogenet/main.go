@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/hex"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"strconv"
+	"strings"
 	"time"
 
 	"code.dogecoin.org/gossip/dnet"
@@ -19,49 +21,111 @@ import (
 	"code.dogecoin.org/dogenet/internal/web"
 )
 
-const DogeNetConnections = 4
-const CoreNodeListeners = 1
+const WebAPIDefaultPort = 8085
+const CoreNodeDefaultPort = 22556
 const StoreFilename = "storage/dogenet.db"
 
-func DogeNetMain(localNode string, localPort uint16, remotePort uint16, webPort uint16) {
+func main() {
+	var crawl int
+	binds := []dnet.Address{}
+	bindweb := []dnet.Address{}
+	public := dnet.Address{}
+	core := dnet.Address{}
+	peers := []spec.NodeInfo{}
+
+	flag.IntVar(&crawl, "crawl", 0, "number of core node crawlers")
+	flag.Func("bind", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		addr, err := parseIPPort(arg, "bind", dnet.DogeNetDefaultPort)
+		if err != nil {
+			return err
+		}
+		binds = append(binds, addr)
+		return nil
+	})
+	flag.Func("web", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		addr, err := parseIPPort(arg, "web", WebAPIDefaultPort)
+		if err != nil {
+			return err
+		}
+		bindweb = append(bindweb, addr)
+		return nil
+	})
+	flag.Func("public", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		addr, err := parseIPPort(arg, "public", dnet.DogeNetDefaultPort)
+		if err != nil {
+			return err
+		}
+		public = addr
+		return nil
+	})
+	flag.Func("core", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		addr, err := parseIPPort(arg, "core", CoreNodeDefaultPort)
+		if err != nil {
+			return err
+		}
+		core = addr
+		return nil
+	})
+	flag.Func("peer", "<pubkey>:<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		parts := strings.SplitN(arg, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("bad --peer: expecting ':' in argument: %v", arg)
+		}
+		pub, err := hex.DecodeString(parts[0])
+		if err != nil || len(pub) != 32 {
+			return fmt.Errorf("bad --peer: invalid hex pubkey: %v", parts[0])
+		}
+		addr, err := parseIPPort(arg, "peer", dnet.DogeNetDefaultPort)
+		if err != nil {
+			return err
+		}
+		peers = append(peers, spec.NodeInfo{
+			PubKey: pub,
+			Addr:   addr,
+		})
+		return nil
+	})
+	flag.Parse()
+	if len(binds) < 1 {
+		binds = append(binds, dnet.Address{
+			Host: net.IP([]byte{0, 0, 0, 0}),
+			Port: dnet.DogeNetDefaultPort,
+		})
+	}
+	if len(bindweb) < 1 {
+		bindweb = append(bindweb, dnet.Address{
+			Host: net.IP([]byte{0, 0, 0, 0}),
+			Port: WebAPIDefaultPort,
+		})
+	}
+
 	// load the previously saved state.
 	db, err := store.NewSQLiteStore(StoreFilename)
 	if err != nil {
-		log.Println("Cannot open database:", StoreFilename)
+		log.Printf("Error opening database: %v [%s]\n", err, StoreFilename)
 		os.Exit(1)
 	}
 
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
-	if localPort == 0 {
-		localPort = dnet.DogeNetDefaultPort
-	}
-	publicAddr := spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort} // XXX
-	gov.Add("gossip", netsvc.New(spec.Address{Host: net.IPv4(0, 0, 0, 0), Port: localPort}, publicAddr, db))
+	netSvc := netsvc.New(binds, public, db)
+	gov.Add("gossip", netSvc)
 
 	// stay connected to local node if specified.
-	if localNode != "" {
-		addr := net.ParseIP(localNode)
-		if addr == nil {
-			log.Println("Invalid ip address on command line:", localNode)
-			os.Exit(1)
-		}
-		gov.Add("local-node", collector.New(db, store.Address{Host: addr, Port: 22556}, 0, true))
+	if core.IsValid() {
+		gov.Add("local-node", collector.New(db, core, 0, true))
 	}
 
-	// stay connected to DogeNet nodes.
-	// for n := 0; n < DogeNetConnections; n++ {
-	// 	gov.Add("", NewDogeNet())
-	// }
-
-	// start connecting to Core Nodes.
-	// for n := 0; n < CoreNodeListeners; n++ {
-	// 	gov.Add(fmt.Sprintf("remote-%d", n), collector.New(db, store.Address{}, 5*time.Minute, false))
-	// }
+	// start crawling Core Nodes.
+	for n := 0; n < crawl; n++ {
+		gov.Add(fmt.Sprintf("crawler-%d", n), collector.New(db, store.Address{}, 5*time.Minute, false))
+	}
 
 	// start the web server.
-	gov.Add("web-api", web.New(db, "localhost", int(webPort)))
+	for _, bind := range bindweb {
+		gov.Add("web-api", web.New(bind, db, netSvc))
+	}
 
 	// run services until interrupted.
 	gov.Start()
@@ -69,23 +133,25 @@ func DogeNetMain(localNode string, localPort uint16, remotePort uint16, webPort 
 	fmt.Println("finished.")
 }
 
-func main() {
-	// required IP address of local node.
-	// core node addresses are discovered via the local node.
-	if len(os.Args) < 2 {
-		log.Printf("usage: dogenet <local-core-node-ip> <port-offset>")
-	}
-	localNode := os.Args[1]
-	webPort := 8085
-	localPort := int(dnet.DogeNetDefaultPort)
-	remotePort := int(dnet.DogeNetDefaultPort)
-	if len(os.Args) > 2 {
-		add, err := strconv.Atoi(os.Args[2])
-		if err != nil {
-			log.Panicf("invalid port offset: %s", os.Args[2])
+// Parse an IPv4 or IPv6 address with optional port.
+func parseIPPort(arg string, name string, defaultPort uint16) (dnet.Address, error) {
+	// net.SplitHostPort doesn't return a specific error code,
+	// so we need to detect if the port it present manually.
+	colon := strings.LastIndex(arg, ":")
+	bracket := strings.LastIndex(arg, "]")
+	if colon == -1 || (arg[0] == '[' && bracket != -1 && colon < bracket) {
+		ip := net.ParseIP(arg)
+		if ip == nil {
+			return dnet.Address{}, fmt.Errorf("bad --%v: invalid IP address: %v (use [<ip>]:port for IPv6)", name, arg)
 		}
-		webPort += add
-		localPort += add
+		return dnet.Address{
+			Host: ip,
+			Port: defaultPort,
+		}, nil
 	}
-	DogeNetMain(localNode, uint16(localPort), uint16(remotePort), uint16(webPort))
+	res, err := dnet.ParseAddress(arg)
+	if err != nil {
+		return dnet.Address{}, fmt.Errorf("bad --%v: invalid IP address: %v (use [<ip>]:port for IPv6)", name, arg)
+	}
+	return res, nil
 }

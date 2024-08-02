@@ -30,19 +30,6 @@ package store
 // 	SeedNodes []Address // queue of seed nodes (low priority)
 // }
 
-// addr:  [sig_64][boxpub_32][utcsec_6][port_2][ip_16][services_8][idpub_32][vlen]{[vlen]<key>[vlen]<value>} /161+
-// ident: [sig_64][idpub_32][utcsec_6][vlen]{[vlen]<key>[vlen]<value>}[vlen][boxpub_32] /500+
-// keys:  name img bio s:x s:fb s:reddit l:x l:fb l:reddit l:foo –– ident keys
-// how do we announce services on the box?
-// how much of this do we fetch vs gossip?
-
-// [sig_64][boxpub_32][utcsec_6][port_2][ip_16][services_8][idpub_32] /160
-// [sig_64][idpub_32][utcsec_6][vlen][boxpub_32][vlen]{[vlen]<key>[vlen]<value>} /200+
-
-// db: `type_2`,`boxpub_32`,`addr_16`,`services_8`,`utcsec_8`,`port_2`,`idpub_32`       /100
-// core:  01,   0000000000,  IPv6,       1,       1716879923,  22556,  000000000000
-// box:   02,   1234567890,  IPv6,       4,       1716879923,  22557,  567890123456
-
 // index: `id_32` (primary key unique pubkey lookup)
 // index: `ip_16`,`port_2` (unique address lookup)
 // new fields: `ident_32`,`sig_64`
@@ -267,56 +254,3 @@ package store
 // 	// no nodes available
 // 	return Address{}
 // }
-
-// func (t *NetMap) LoadFrom(path string) error {
-// 	t.mu.Lock()
-// 	defer t.mu.Unlock()
-// 	err := readGobInto(path, &t.state)
-// 	if err != nil {
-// 		// GOB won't parse if earlier than format 3.
-// 		t.state, err = migrateToFormat3(path)
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
-
-// func (t *NetMap) Persist(path string) error {
-// 	t.mu.Lock()
-// 	defer t.mu.Unlock()
-// 	tempFile, err := os.CreateTemp("", "temp_gob_file")
-// 	if err != nil {
-// 		return fmt.Errorf("cannot create temporary file: %w", err)
-// 	}
-// 	defer os.Remove(tempFile.Name())
-// 	encoder := gob.NewEncoder(tempFile)
-// 	if err := encoder.Encode(t.state); err != nil {
-// 		return fmt.Errorf("cannot encode object: %w", err)
-// 	}
-// 	if err := tempFile.Close(); err != nil {
-// 		return fmt.Errorf("cannot close temporary file: %w", err)
-// 	}
-// 	if err := os.Rename(tempFile.Name(), path); err != nil {
-// 		return fmt.Errorf("cannot rename temporary file to %q: %w", path, err)
-// 	}
-// 	return nil
-// }
-
-// func readGobInto(path string, into any) error {
-// 	file, err := os.Open(path)
-// 	if err != nil {
-// 		return fmt.Errorf("cannot open file %q: %w", path, err)
-// 	}
-// 	defer file.Close()
-// 	decoder := gob.NewDecoder(file)
-// 	if err := decoder.Decode(into); err != nil {
-// 		if err == io.EOF {
-// 			return fmt.Errorf("file %q is truncated", path)
-// 		}
-// 		return fmt.Errorf("error decoding file %q: %w", path, err)
-// 	}
-// 	return nil
-// }
-
-// // Migration

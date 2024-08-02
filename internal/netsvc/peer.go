@@ -23,7 +23,7 @@ const NewestTime = 1 * time.Hour                // 1 hour into the future
 // and periodically send gossip from channel owners.
 
 type peerConn struct {
-	ns       *netService
+	ns       *NetService
 	conn     net.Conn
 	addr     spec.Address
 	store    spec.Store
@@ -35,7 +35,7 @@ type peerConn struct {
 	peerPub  dnet.PubKey  // Peer's pubkey (32 bytes) for outbound connections, nil for inbound connections
 }
 
-func newPeer(conn net.Conn, addr spec.Address, peerPub dnet.PubKey, ns *netService) *peerConn {
+func newPeer(conn net.Conn, addr spec.Address, peerPub dnet.PubKey, ns *NetService) *peerConn {
 	peer := &peerConn{
 		ns:       ns,
 		conn:     conn,
@@ -45,7 +45,7 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub dnet.PubKey, ns *netServi
 		receive:  make(map[dnet.Tag4CC]chan dnet.Message),
 		send:     make(chan dnet.Message),
 		nodeKey:  ns.nodeKey,
-		idenAddr: ns.bindAddr,
+		idenAddr: ns.pubAddr,
 		idenPub:  ns.idenPub,
 	}
 	return peer
