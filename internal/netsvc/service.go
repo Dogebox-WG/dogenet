@@ -38,16 +38,11 @@ type NetService struct {
 	newPeers    chan spec.NodeInfo
 }
 
-func New(bind []spec.Address, pubAddr spec.Address, store spec.Store) spec.NetSvc {
-	nodeKey, err := dnet.GenerateKeyPair()
-	if err != nil {
-		panic(fmt.Sprintf("cannot generate node keypair: %v", err))
-	}
+func New(bind []spec.Address, pubAddr spec.Address, store spec.Store, nodeKey dnet.KeyPair) spec.NetSvc {
 	idenKey, err := dnet.GenerateKeyPair()
 	if err != nil {
 		panic(fmt.Sprintf("cannot generate iden keypair: %v", err))
 	}
-	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub))
 	log.Printf("Iden PubKey is: %v", hex.EncodeToString(idenKey.Pub))
 	return &NetService{
 		bindAddrs:   bind,
@@ -201,7 +196,7 @@ func (ns *NetService) choosePeer() spec.NodeInfo {
 		select {
 		case np := <-ns.newPeers: // from ns.AddPeer()
 			return np
-		case <-time.After(60 * time.Second):
+		case <-time.After(30 * time.Second):
 			continue
 		}
 	}

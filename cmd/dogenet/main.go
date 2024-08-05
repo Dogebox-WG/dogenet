@@ -89,6 +89,21 @@ func main() {
 		return nil
 	})
 	flag.Parse()
+	if flag.NArg() > 0 {
+		cmd := flag.Arg(0)
+		switch cmd {
+		case "genkey":
+			nodeKey, err := dnet.GenerateKeyPair()
+			if err != nil {
+				panic(fmt.Sprintf("cannot generate node keypair: %v", err))
+			}
+			fmt.Printf("%v", hex.EncodeToString(nodeKey.Priv))
+			os.Exit(0)
+		default:
+			log.Printf("Unexpected argument: %v", cmd)
+			os.Exit(1)
+		}
+	}
 	if len(binds) < 1 {
 		binds = append(binds, dnet.Address{
 			Host: net.IP([]byte{0, 0, 0, 0}),
@@ -102,6 +117,10 @@ func main() {
 		})
 	}
 
+	// get the private key from the KEY env-var
+	nodeKey := keyPairFromEnv()
+	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub))
+
 	// load the previously saved state.
 	db, err := store.NewSQLiteStore(dbfile, context.Background())
 	if err != nil {
@@ -112,7 +131,7 @@ func main() {
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
-	netSvc := netsvc.New(binds, public, db)
+	netSvc := netsvc.New(binds, public, db, nodeKey)
 	gov.Add("gossip", netSvc)
 
 	// stay connected to local node if specified.
@@ -157,4 +176,20 @@ func parseIPPort(arg string, name string, defaultPort uint16) (dnet.Address, err
 		return dnet.Address{}, fmt.Errorf("bad --%v: invalid IP address: %v (use [<ip>]:port for IPv6)", name, arg)
 	}
 	return res, nil
+}
+
+func keyPairFromEnv() dnet.KeyPair {
+	// get the private key from the KEY env-var
+	keyHex := os.Getenv("KEY")
+	os.Setenv("KEY", "") // don't leave the key in the environment
+	privPub, err := hex.DecodeString(keyHex)
+	if err != nil {
+		log.Printf("Invalid KEY hex in env-var: %v", err)
+		os.Exit(3)
+	}
+	if len(privPub) != 64 {
+		log.Printf("Invalid KEY hex in env-var: must be 64 bytes (see `dogenet genkey`)")
+		os.Exit(3)
+	}
+	return dnet.KeyPairFromPrivKey(privPub)
 }
