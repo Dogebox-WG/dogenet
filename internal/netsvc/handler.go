@@ -9,15 +9,12 @@ import (
 	"sync/atomic"
 
 	"code.dogecoin.org/gossip/dnet"
-
-	"code.dogecoin.org/dogenet/internal/spec"
 )
 
 type handlerConn struct {
 	ns      *NetService
 	conn    net.Conn
 	channel uint32 // for atomic.Load
-	store   spec.Store
 	receive map[dnet.Tag4CC]chan dnet.Message
 	send    chan []byte // raw message
 	name    string
@@ -27,7 +24,6 @@ func newHandler(conn net.Conn, ns *NetService) *handlerConn {
 	hand := &handlerConn{
 		ns:      ns,
 		conn:    conn,
-		store:   ns.store,
 		receive: make(map[dnet.Tag4CC]chan dnet.Message),
 		send:    make(chan []byte),
 		name:    "protocol-handler",

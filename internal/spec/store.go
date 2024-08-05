@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"context"
 	"net"
 	"time"
 
@@ -10,8 +11,13 @@ import (
 // Keep nodes in the map for 5 days before expiry
 const ExpiryTime = time.Duration(5 * 24 * time.Hour)
 
+// Store is the top-level interface (e.g. SQLiteStore)
 type Store interface {
-	NodeKey() (pub PubKey, priv PrivKey)
+	WithCtx(ctx context.Context) StoreCtx
+}
+
+// StoreCtx is a Store bound to a cancellable Context
+type StoreCtx interface {
 	CoreStats() (mapSize int, newNodes int)
 	NetStats() (mapSize int, newNodes int)
 	NodeList() (res NodeListRes)
@@ -22,16 +28,12 @@ type Store interface {
 	ChooseCoreNode() Address
 	SampleCoreNodes() []Address
 	// dogenet nodes
-	AddNetNode(pubkey PubKey, address Address, time int64, owner PubKey, channels []dnet.Tag4CC, msg []byte) (changed bool, err error)
+	GetAnnounce() (payload []byte, sig []byte, time int64, err error)
+	SetAnnounce(payload []byte, sig []byte, time int64) error
+	AddNetNode(key PubKey, address Address, time int64, owner PubKey, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error)
 	UpdateNetTime(key PubKey)
 	ChooseNetNode() NodeInfo
 	SampleNetNodes() []NodeInfo
 	SampleNodesByChannel(channels []dnet.Tag4CC, exclude []PubKey) []NodeInfo
 	SampleNodesByIP(ipaddr net.IP, exclude []PubKey) []NodeInfo
 }
-
-// type Service struct {
-// 	Tag  dnet.Tag4CC // [4] Service Tag (Big-Endian)
-// 	Port uint16      // [2] TCP Port number (Big-Endian)
-// 	Data string      // [1+] Service Data (optional)
-// }

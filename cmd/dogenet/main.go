@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -32,8 +33,10 @@ func main() {
 	public := dnet.Address{}
 	core := dnet.Address{}
 	peers := []spec.NodeInfo{}
+	dbfile := StoreFilename
 
 	flag.IntVar(&crawl, "crawl", 0, "number of core node crawlers")
+	flag.StringVar(&dbfile, "db", StoreFilename, "path to SQLite database")
 	flag.Func("bind", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		addr, err := parseIPPort(arg, "bind", dnet.DogeNetDefaultPort)
 		if err != nil {
@@ -100,9 +103,9 @@ func main() {
 	}
 
 	// load the previously saved state.
-	db, err := store.NewSQLiteStore(StoreFilename)
+	db, err := store.NewSQLiteStore(dbfile, context.Background())
 	if err != nil {
-		log.Printf("Error opening database: %v [%s]\n", err, StoreFilename)
+		log.Printf("Error opening database: %v [%s]\n", err, dbfile)
 		os.Exit(1)
 	}
 

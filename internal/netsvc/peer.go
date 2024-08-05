@@ -26,7 +26,7 @@ const NewestTime = 1 * time.Hour                // 1 hour into the future
 type peerConn struct {
 	ns       *NetService
 	conn     net.Conn
-	store    spec.Store
+	store    spec.StoreCtx
 	receive  map[dnet.Tag4CC]chan dnet.Message
 	send     chan []byte // raw message
 	mutex    sync.Mutex
@@ -41,7 +41,7 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub dnet.PubKey, ns *NetServi
 	peer := &peerConn{
 		ns:       ns,
 		conn:     conn,
-		store:    ns.store,
+		store:    ns.cstore,
 		receive:  make(map[dnet.Tag4CC]chan dnet.Message),
 		send:     make(chan []byte),
 		addr:     addr,
@@ -93,9 +93,11 @@ func (peer *peerConn) receiveFromPeer(who string) {
 		}
 		// 5. Update the peer address, timestamp, etc in our database.
 		// NB. This may broadcast a [Node][Addr] to other connected peers.
-		who, err = peer.ingestAddress(msg)
+		newwho, err := peer.ingestAddress(msg)
 		if err != nil {
 			log.Printf("[%s] %v", who, err)
+		} else {
+			who = newwho
 		}
 		// 6. OK to start forwaring messages to the peer now.
 		go peer.sendToPeer(who)
@@ -108,21 +110,27 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			peer.ns.closePeer(peer)
 			return
 		}
-		// 2. Verify it is a [Node][Addr] message.
+		// 2. Check if we received our own pubkey (connected to self)
+		if bytes.Equal(msg.PubKey, peer.nodeKey.Pub) {
+			log.Printf("[%s] connected to self: [%v]", who, hex.EncodeToString(msg.PubKey))
+			peer.ns.closePeer(peer)
+			return
+		}
+		// 3. Verify it is a [Node][Addr] message.
 		if msg.Chan != node.ChannelNode || msg.Tag != node.TagAddress {
 			log.Printf("[%s] expecting [Node][Addr] message but received: [%v][%v]", who, msg.Chan.String(), msg.Tag.String())
 			peer.ns.closePeer(peer)
 			return
 		}
-		// 3. Verify the peer announced a valid address.
+		// 4. Verify the peer announced a valid address.
 		// NB. This may broadcast a [Node][Addr] to other connected peers.
 		who, err := peer.ingestAddress(msg)
 		if err != nil {
 			log.Printf("[%s] %v", who, err)
 		}
-		// 4. Send our [Node][Addr] "return announcement"
+		// 5. Send our [Node][Addr] "return announcement"
 		peer.sendMyAddress(conn)
-		// 5. OK to start forwaring messages to the peer now.
+		// 6. OK to start forwaring messages to the peer now.
 		go peer.sendToPeer(who)
 	}
 	// Once peers have exchanged [Node][Addr] messages,
@@ -138,9 +146,13 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			// Received a [Node][Addr] announcement about some/any node.
 			// NB. This may broadcast a [Node][Addr] to all connected peers,
 			// excluding those still waiting for a "return announcement".
-			who, err = peer.ingestAddress(msg)
-			if err != nil {
-				log.Printf("[%s] %v", who, err)
+			if bytes.Equal(msg.PubKey, peer.nodeKey.Pub) {
+				log.Printf("[%s] ignored my own announce: [%v]", who, hex.EncodeToString(msg.PubKey))
+			} else {
+				who, err = peer.ingestAddress(msg)
+				if err != nil {
+					log.Printf("[%s] %v", who, err)
+				}
 			}
 		}
 		// Forward the received message to channel owners.
@@ -154,26 +166,28 @@ func (peer *peerConn) receiveFromPeer(who string) {
 // runs in receiveFromPeer
 func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	defer func() {
-		if e := recover(); err != nil { // for DecodeAddrMsg
+		if e := recover(); e != nil { // for DecodeAddrMsg
 			err = fmt.Errorf("address decode error: %v", e)
 		}
 	}()
 	// Check that the peer address is a public IP address
 	addr := node.DecodeAddrMsg(msg.Payload)
 	ip := net.IP(addr.Address)
+	hexpub := hex.EncodeToString(msg.PubKey)
+	log.Printf("received announce: %v:%v [%v]", ip.String(), addr.Port, hexpub)
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() {
-		// return "", fmt.Errorf("peer announced a private address: %v [%v]", ip.String(), hex.EncodeToString(msg.PubKey))
-		log.Printf("peer announced a private address: %v [%v]", ip.String(), hex.EncodeToString(msg.PubKey))
+		// return "", fmt.Errorf("peer announced a private address: %v [%v]", ip.String(), hexpub)
+		log.Printf("peer announced a private address: %v [%v]", ip.String(), hexpub)
 	}
 	// Check the timestamp: cannot be more than 30 days old, or more than 1 hour in the future.
 	ts := addr.Time.Local()
 	now := time.Now()
 	if ts.Before(now.Add(OldestTime)) || ts.After(now.Add(NewestTime)) {
-		return "", fmt.Errorf("peer timestamp out of range: %v vs %v (our time): %v [%v]", ts.String(), now.String(), ip.String(), hex.EncodeToString(msg.PubKey))
+		return "", fmt.Errorf("peer timestamp out of range: %v vs %v (our time): %v [%v]", ts.String(), now.String(), ip.String(), hexpub)
 	}
 	// Add the peer to our database (update peer info for known peer)
 	public := dnet.Address{Host: ip, Port: addr.Port}
-	isnew, err := peer.store.AddNetNode(msg.PubKey, public, ts.Unix(), addr.Owner, addr.Channels, msg.RawMsg)
+	isnew, err := peer.store.AddNetNode(msg.PubKey, public, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
 	if err != nil {
 		return
 	}
@@ -186,7 +200,7 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	peer.addr = public
 	if isnew {
 		// re-broadcast the `Addr` message to all connected peers
-		peer.send <- msg.RawMsg
+		peer.ns.forwardToPeers(msg.RawMsg)
 	}
 	return
 }

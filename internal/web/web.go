@@ -42,6 +42,7 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Servi
 type WebAPI struct {
 	governor.ServiceCtx
 	store  spec.Store
+	cstore spec.StoreCtx
 	srv    http.Server
 	netSvc spec.NetSvc
 }
@@ -59,6 +60,7 @@ func (a *WebAPI) Stop() {
 
 // goroutine
 func (a *WebAPI) Run() {
+	a.cstore = a.store.WithCtx(a.Context) // Service Context is first available here
 	log.Printf("HTTP server listening on: %v\n", a.srv.Addr)
 	if err := a.srv.ListenAndServe(); err != http.ErrServerClosed { // blocking call
 		log.Printf("HTTP server: %v\n", err)
@@ -67,7 +69,7 @@ func (a *WebAPI) Run() {
 
 func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		bytes, err := json.Marshal(a.store.NodeList())
+		bytes, err := json.Marshal(a.cstore.NodeList())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error encoding JSON: %s", err.Error()), http.StatusInternalServerError)
 			return

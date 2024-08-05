@@ -30,6 +30,7 @@ func New(store spec.Store, fromAddr spec.Address, maxTime time.Duration, isLocal
 type Collector struct {
 	governor.ServiceCtx
 	store   spec.Store
+	cstore  spec.StoreCtx
 	mutex   sync.Mutex
 	conn    net.Conn
 	Address spec.Address
@@ -51,10 +52,11 @@ func (c *Collector) Stop() {
 // goroutine
 func (c *Collector) Run() {
 	for {
+		c.cstore = c.store.WithCtx(c.Context) // Service Context is first available here
 		// choose the next node to connect to
 		remoteNode := c.Address
 		for !remoteNode.IsValid() {
-			if remoteNode = c.store.ChooseCoreNode(); remoteNode.IsValid() {
+			if remoteNode = c.cstore.ChooseCoreNode(); remoteNode.IsValid() {
 				break
 			}
 			// none available, wait for local listener to add nodes
@@ -123,10 +125,10 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 
 	// successful connection: update the node's timestamp.
 	if !c.isLocal {
-		c.store.UpdateCoreTime(nodeAddr)
+		c.cstore.UpdateCoreTime(nodeAddr)
 	}
 
-	dbSize, newLen := c.store.CoreStats()
+	dbSize, newLen := c.cstore.CoreStats()
 	fmt.Printf("[%s] %d in DB, %d new\n", who, dbSize, newLen)
 
 	addresses := 0
@@ -152,17 +154,17 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 
 		case "addr":
 			addr := msg.DecodeAddrMsg(payload, nodeVer)
-			_, oldLen := c.store.CoreStats()
+			_, oldLen := c.cstore.CoreStats()
 			kept := 0
 			keepAfter := time.Now().Add(-spec.ExpiryTime).Unix()
 			for _, a := range addr.AddrList {
 				// fmt.Println("• ", net.IP(a.Address), a.Port, "svc", a.Services, "ts", a.Time)
 				if int64(a.Time) >= keepAfter {
-					c.store.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, int64(a.Time), a.Services)
+					c.cstore.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, int64(a.Time), a.Services)
 					kept++
 				}
 			}
-			dbSize, newLen := c.store.CoreStats()
+			dbSize, newLen := c.cstore.CoreStats()
 			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in DB\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), dbSize)
 			addresses += len(addr.AddrList)
 			if addresses >= 1001 {

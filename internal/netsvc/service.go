@@ -29,6 +29,7 @@ type NetService struct {
 	socket      net.Listener
 	channels    map[dnet.Tag4CC]chan dnet.Message
 	store       spec.Store
+	cstore      spec.StoreCtx
 	nodeKey     dnet.KeyPair
 	idenPub     dnet.PubKey
 	connections map[net.Conn]spec.Address
@@ -62,6 +63,7 @@ func New(bind []spec.Address, pubAddr spec.Address, store spec.Store) spec.NetSv
 
 // goroutine
 func (ns *NetService) Run() {
+	ns.cstore = ns.store.WithCtx(ns.Context) // Service Context is first available here
 	var wg sync.WaitGroup
 	ns.startListeners(&wg)
 	go ns.acceptHandlers()
@@ -186,7 +188,7 @@ func (ns *NetService) choosePeer() spec.NodeInfo {
 			return np
 		default:
 			if ns.countPeers() < IdealPeers {
-				np := ns.store.ChooseNetNode()
+				np := ns.cstore.ChooseNetNode()
 				if np.IsValid() {
 					if ns.havePeer(np.PubKey) {
 						continue // pick again
