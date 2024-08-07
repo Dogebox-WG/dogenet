@@ -42,7 +42,6 @@ display on the DogeMap and for use in future social *pups*[^1].
 This facility is currently used by the Identity Protocol-Handler:
 [rad:z4FoA61FxfXyXpfDovtPKQQfiWJWH](https://app.radicle.xyz/nodes/ash.radicle.garden/z4FoA61FxfXyXpfDovtPKQQfiWJWH)
 
-## Pups
 
 [^1]: a **pup** is a small application package that can be installed on the DogeBox.
 Pups run inside a security sandbox; they can access local services on the box
