@@ -3,7 +3,6 @@ package netsvc
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -38,19 +37,14 @@ type NetService struct {
 	newPeers    chan spec.NodeInfo
 }
 
-func New(bind []spec.Address, pubAddr spec.Address, store spec.Store, nodeKey dnet.KeyPair) spec.NetSvc {
-	idenKey, err := dnet.GenerateKeyPair()
-	if err != nil {
-		panic(fmt.Sprintf("cannot generate iden keypair: %v", err))
-	}
-	log.Printf("Iden PubKey is: %v", hex.EncodeToString(idenKey.Pub))
+func New(bind []spec.Address, pubAddr spec.Address, store spec.Store, nodeKey dnet.KeyPair, idenPub spec.PubKey) spec.NetSvc {
 	return &NetService{
 		bindAddrs:   bind,
 		pubAddr:     pubAddr,
 		channels:    make(map[dnet.Tag4CC]chan dnet.Message),
 		store:       store,
 		nodeKey:     nodeKey,
-		idenPub:     idenKey.Pub,
+		idenPub:     idenPub,
 		connections: make(map[net.Conn]spec.Address),
 		newPeers:    make(chan spec.NodeInfo, 10),
 	}
@@ -113,7 +107,7 @@ func (ns *NetService) acceptIncoming(listner net.Listener, who string, wg *sync.
 		}
 		peer := newPeer(conn, remote, nil, ns) // inbound connection (no peerPub)
 		if ns.trackPeer(peer) {
-			log.Printf("[%s] peer connected: %v", who, remote)
+			log.Printf("[%s] peer connected (inbound): %v", who, remote)
 			peer.start()
 		} else { // Stop was called
 			conn.Close()
@@ -153,8 +147,9 @@ func (ns *NetService) acceptHandlers() {
 func (ns *NetService) attractPeers() {
 	who := "attract-peers"
 	for !ns.Stopping() {
-		node := ns.choosePeer()
-		log.Printf("[%s] choosing peer: %v [%v]", who, node.Addr, hex.EncodeToString(node.PubKey))
+		node := ns.choosePeer(who)
+		pubHex := hex.EncodeToString(node.PubKey)
+		log.Printf("[%s] choosing peer: %v [%v]", who, node.Addr, pubHex)
 		if node.IsValid() {
 			// attempt to connect to the peer
 			d := net.Dialer{Timeout: 30 * time.Second}
@@ -164,6 +159,7 @@ func (ns *NetService) attractPeers() {
 			} else {
 				peer := newPeer(conn, node.Addr, node.PubKey, ns) // outbound connection (have PeerPub)
 				if ns.trackPeer(peer) {
+					log.Printf("[%s] connected to peer (outbound): %v [%v]", who, node.Addr, pubHex)
 					peer.start()
 					continue
 				} else { // Stop was called
@@ -176,15 +172,17 @@ func (ns *NetService) attractPeers() {
 }
 
 // called from attractPeers
-func (ns *NetService) choosePeer() spec.NodeInfo {
+func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 	for !ns.Stopping() {
 		select {
 		case np := <-ns.newPeers: // from ns.AddPeer()
 			return np
 		default:
 			if ns.countPeers() < IdealPeers {
-				np := ns.cstore.ChooseNetNode()
-				if np.IsValid() {
+				np, err := ns.cstore.ChooseNetNode()
+				if err != nil {
+					log.Printf("[%s] ChooseNetNode: %v", who, err)
+				} else if np.IsValid() {
 					if ns.havePeer(np.PubKey) {
 						continue // pick again
 					}

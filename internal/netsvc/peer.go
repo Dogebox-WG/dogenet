@@ -33,7 +33,7 @@ type peerConn struct {
 	addr     spec.Address // Peer's public address
 	peerPub  dnet.PubKey  // Peer's pubkey (32 bytes) for outbound connections, nil for inbound connections
 	nodeKey  dnet.KeyPair // [const] to sign `Addr` messages (key for THIS node)
-	idenAddr spec.Address // [const] to include in `Addr` messages (address of THIS node)
+	nodeAddr spec.Address // [const] to include in `Addr` messages (address of THIS node)
 	idenPub  dnet.PubKey  // [const] to include in `Addr` messages (pubkey of THIS node's owner)
 }
 
@@ -43,11 +43,11 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub dnet.PubKey, ns *NetServi
 		conn:     conn,
 		store:    ns.cstore,
 		receive:  make(map[dnet.Tag4CC]chan dnet.Message),
-		send:     make(chan []byte),
+		send:     make(chan []byte, 100),
 		addr:     addr,
 		peerPub:  peerPub,
 		nodeKey:  ns.nodeKey,
-		idenAddr: ns.pubAddr,
+		nodeAddr: ns.pubAddr,
 		idenPub:  ns.idenPub,
 	}
 	return peer
@@ -142,6 +142,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			peer.ns.closePeer(peer)
 			return
 		}
+		log.Printf("[%s] received from peer: [%v][%v]", who, msg.Chan, msg.Tag)
 		if msg.Chan == node.ChannelNode && msg.Tag == node.TagAddress {
 			// Received a [Node][Addr] announcement about some/any node.
 			// NB. This may broadcast a [Node][Addr] to all connected peers,
@@ -156,7 +157,6 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			}
 		}
 		// Forward the received message to channel owners.
-		log.Printf("[%s] received from peer: %v %v", who, msg.Chan, msg.Tag)
 		if !peer.ns.forwardToHandlers(msg.Chan, msg.RawMsg) {
 			log.Printf("[%s] no handlers on channel: %s", who, msg.Chan)
 		}
@@ -173,31 +173,33 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	// Check that the peer address is a public IP address
 	addr := node.DecodeAddrMsg(msg.Payload)
 	ip := net.IP(addr.Address)
+	peerAddr := dnet.Address{Host: ip, Port: addr.Port}
 	hexpub := hex.EncodeToString(msg.PubKey)
-	log.Printf("received announce: %v:%v [%v]", ip.String(), addr.Port, hexpub)
+	log.Printf("received announce: %v [%v]", peerAddr, hexpub)
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() {
 		// return "", fmt.Errorf("peer announced a private address: %v [%v]", ip.String(), hexpub)
-		log.Printf("peer announced a private address: %v [%v]", ip.String(), hexpub)
+		log.Printf("peer announced a private address: %v [%v]", peerAddr, hexpub)
 	}
 	// Check the timestamp: cannot be more than 30 days old, or more than 1 hour in the future.
 	ts := addr.Time.Local()
 	now := time.Now()
 	if ts.Before(now.Add(OldestTime)) || ts.After(now.Add(NewestTime)) {
-		return "", fmt.Errorf("peer timestamp out of range: %v vs %v (our time): %v [%v]", ts.String(), now.String(), ip.String(), hexpub)
+		return "", fmt.Errorf("peer timestamp out of range: %v vs %v (our time): %v [%v]", ts.String(), now.String(), peerAddr, hexpub)
 	}
 	// Add the peer to our database (update peer info for known peer)
-	public := dnet.Address{Host: ip, Port: addr.Port}
-	isnew, err := peer.store.AddNetNode(msg.PubKey, public, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
+	log.Printf("[%s] started adding node: %v %v", who, peerAddr, hexpub)
+	isnew, err := peer.store.AddNetNode(msg.PubKey, peerAddr, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
+	log.Printf("[%s] finished adding node: %v %v", who, peerAddr, hexpub)
 	if err != nil {
 		return
 	}
 	// Update `who` string for this peer.
-	who = fmt.Sprintf("%v/%v", hex.EncodeToString(msg.PubKey[0:6]), public)
+	who = fmt.Sprintf("%v/%v", hex.EncodeToString(msg.PubKey[0:6]), peerAddr)
 	// Lock peer fields and update.
 	peer.mutex.Lock()
 	defer peer.mutex.Unlock()
 	peer.peerPub = msg.PubKey
-	peer.addr = public
+	peer.addr = peerAddr
 	if isnew {
 		// re-broadcast the `Addr` message to all connected peers
 		peer.ns.forwardToPeers(msg.RawMsg)
@@ -213,7 +215,7 @@ func (peer *peerConn) sendToPeer(who string) {
 		case raw := <-peer.send:
 			// forward the raw message to the peer
 			cha, tag := dnet.MsgView(raw).ChanTag()
-			log.Printf("[%s] sending to peer: %v %v", who, cha, tag)
+			log.Printf("[%s] sending to peer: [%v][%v]", who, cha, tag)
 			_, err := conn.Write(raw)
 			if err != nil {
 				log.Printf("[%s] failed to send: %v", who, err)

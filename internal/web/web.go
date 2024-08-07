@@ -69,7 +69,12 @@ func (a *WebAPI) Run() {
 
 func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		bytes, err := json.Marshal(a.cstore.NodeList())
+		list, err := a.cstore.NodeList()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error in query: %s", err.Error()), http.StatusInternalServerError)
+			return
+		}
+		bytes, err := json.Marshal(list)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error encoding JSON: %s", err.Error()), http.StatusInternalServerError)
 			return

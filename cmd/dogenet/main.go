@@ -118,8 +118,9 @@ func main() {
 	}
 
 	// get the private key from the KEY env-var
-	nodeKey := keyPairFromEnv()
+	nodeKey, idenPub := keysFromEnv()
 	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub))
+	log.Printf("Iden PubKey is: %v", hex.EncodeToString(idenPub))
 
 	// load the previously saved state.
 	db, err := store.NewSQLiteStore(dbfile, context.Background())
@@ -131,7 +132,7 @@ func main() {
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
-	netSvc := netsvc.New(binds, public, db, nodeKey)
+	netSvc := netsvc.New(binds, public, db, nodeKey, idenPub)
 	gov.Add("gossip", netSvc)
 
 	// stay connected to local node if specified.
@@ -148,6 +149,9 @@ func main() {
 	for _, bind := range bindweb {
 		gov.Add("web-api", web.New(bind, db, netSvc))
 	}
+
+	// start the store trimmer
+	gov.Add("store", store.NewStoreTrimmer(db))
 
 	// run services until interrupted.
 	gov.Start()
@@ -178,18 +182,37 @@ func parseIPPort(arg string, name string, defaultPort uint16) (dnet.Address, err
 	return res, nil
 }
 
-func keyPairFromEnv() dnet.KeyPair {
+func keysFromEnv() (dnet.KeyPair, spec.PubKey) {
 	// get the private key from the KEY env-var
-	keyHex := os.Getenv("KEY")
+	nodeHex := os.Getenv("KEY")
 	os.Setenv("KEY", "") // don't leave the key in the environment
-	privPub, err := hex.DecodeString(keyHex)
+	if nodeHex == "" {
+		log.Printf("Missing KEY env-var: node public-private keypair (64 bytes; see `dogenet genkey`)")
+		os.Exit(3)
+	}
+	nodeKey, err := hex.DecodeString(nodeHex)
 	if err != nil {
 		log.Printf("Invalid KEY hex in env-var: %v", err)
 		os.Exit(3)
 	}
-	if len(privPub) != 64 {
-		log.Printf("Invalid KEY hex in env-var: must be 64 bytes (see `dogenet genkey`)")
+	if len(nodeKey) != 64 {
+		log.Printf("Invalid KEY hex in env-var: must be 64 bytes")
 		os.Exit(3)
 	}
-	return dnet.KeyPairFromPrivKey(privPub)
+	// get the identity pubkey from IDENT env-var
+	idenHex := os.Getenv("IDENT")
+	if idenHex == "" {
+		log.Printf("Missing IDENT env-var: owner identity public key (32 bytes)")
+		os.Exit(3)
+	}
+	idenPub, err := hex.DecodeString(idenHex)
+	if err != nil {
+		log.Printf("Invalid IDENT hex in env-var: %v", err)
+		os.Exit(3)
+	}
+	if len(idenPub) != 32 {
+		log.Printf("Invalid IDENT hex in env-var: must be 32 bytes")
+		os.Exit(3)
+	}
+	return dnet.KeyPairFromPrivKey(nodeKey), idenPub
 }

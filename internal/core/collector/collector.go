@@ -3,6 +3,7 @@ package collector
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -51,12 +52,17 @@ func (c *Collector) Stop() {
 
 // goroutine
 func (c *Collector) Run() {
+	who := c.Address.String()
 	for {
 		c.cstore = c.store.WithCtx(c.Context) // Service Context is first available here
 		// choose the next node to connect to
 		remoteNode := c.Address
 		for !remoteNode.IsValid() {
-			if remoteNode = c.cstore.ChooseCoreNode(); remoteNode.IsValid() {
+			var err error
+			remoteNode, err = c.cstore.ChooseCoreNode()
+			if err != nil {
+				log.Printf("[%s] ChooseCoreNode: %v", who, err)
+			} else if remoteNode.IsValid() {
 				break
 			}
 			// none available, wait for local listener to add nodes
@@ -128,8 +134,12 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 		c.cstore.UpdateCoreTime(nodeAddr)
 	}
 
-	dbSize, newLen := c.cstore.CoreStats()
-	fmt.Printf("[%s] %d in DB, %d new\n", who, dbSize, newLen)
+	dbSize, newLen, err := c.cstore.CoreStats()
+	if err != nil {
+		fmt.Printf("[%s] CoreStats: %v\n", who, err)
+	} else {
+		fmt.Printf("[%s] %d in DB, %d new\n", who, dbSize, newLen)
+	}
 
 	addresses := 0
 	for {
@@ -154,7 +164,11 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 
 		case "addr":
 			addr := msg.DecodeAddrMsg(payload, nodeVer)
-			_, oldLen := c.cstore.CoreStats()
+			_, oldLen, err := c.cstore.CoreStats()
+			if err != nil {
+				fmt.Printf("[%s] CoreStats: %v\n", who, err)
+				break
+			}
 			kept := 0
 			keepAfter := time.Now().Add(-spec.ExpiryTime).Unix()
 			for _, a := range addr.AddrList {
@@ -164,7 +178,11 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 					kept++
 				}
 			}
-			dbSize, newLen := c.cstore.CoreStats()
+			dbSize, newLen, err := c.cstore.CoreStats()
+			if err != nil {
+				fmt.Printf("[%s] CoreStats: %v\n", who, err)
+				break
+			}
 			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in DB\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), dbSize)
 			addresses += len(addr.AddrList)
 			if addresses >= 1001 {
