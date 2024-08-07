@@ -1,5 +1,6 @@
 .DS_Store
 *.db
 /dogenet
-/dev-key
-/dev1-key
+/dev-key*
+/ident-key*
+/ident-pub*
