@@ -1,4 +1,6 @@
-ash.radicle.garden/z3iGsD9SQumb7dHQgwmfLQ6JTAK4X.git v0.0.0-20240716041207-e497dff071a6 h1:BHEezIqTq51TI2FMEWkm9eEvSD6MuU+ClVcYNs5k8AQ=
-ash.radicle.garden/z3iGsD9SQumb7dHQgwmfLQ6JTAK4X.git v0.0.0-20240716041207-e497dff071a6/go.mod h1:zfzxrbbv1ie2x+mTIV3YBZCDRGzo1LDBWfr7tGruBaw=
+github.com/dogeorg/gossip v0.0.3 h1:OBoAgCtRqP8s2r4bryBAr+DtZ6nAK8XmFRmYoky/gEI=
+github.com/dogeorg/gossip v0.0.3/go.mod h1:OXQ4kWDT3v+G0Qpry7TSnAIzS6/B4SxSKVSNjQ6E32Q=
+github.com/dogeorg/governor v1.0.1 h1:4I2bj6uSOaVaafZbAGBPAlazCVdQ+3noMGrc0lqsK34=
+github.com/dogeorg/governor v1.0.1/go.mod h1:sYCXRKKmwZvvzEFjjP2RRkUMbFMwVmXp3vEQf1vkzj4=
 github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=

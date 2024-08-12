@@ -10,8 +10,12 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/dogenet/main.go",
-            "args": ["--core", "127.0.0.1"],
-            "cwd": "${workspaceFolder}"
+            "args": [], // ["--core", "127.0.0.1"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "KEY":   "c0aaaf522581e715bb19c67acfdef8fb2361189611301c9d41f7c99fe0ded69d752d7d9f445e2fb96c1d2745556ce416fd438b9dfbbe911d40e3432c4e39a06e",
+                "IDENT": "46c57cad6d4d0930a5f4cf11eb030adbf44e035a90f7e75c57bc4ec5e79dd4f4"
+            }
         }
     ]
 }

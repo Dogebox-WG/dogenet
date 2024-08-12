@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"sync"
 	"time"
 
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -26,14 +25,12 @@ const SecondsPerDay = 24 * 60 * 60
 // SELECT * FROM table WHERE id IN (SELECT id FROM table ORDER BY RANDOM() LIMIT 10)
 
 type SQLiteStore struct {
-	db    *sql.DB
-	mutex sync.Mutex
+	db *sql.DB
 }
 
 type SQLiteStoreCtx struct {
-	_db   *sql.DB
-	mutex *sync.Mutex
-	ctx   context.Context
+	_db *sql.DB
+	ctx context.Context
 }
 
 var _ spec.Store = &SQLiteStore{}
@@ -103,7 +100,7 @@ func NewSQLiteStore(fileName string, ctx context.Context) (spec.Store, error) {
 		return store, dbErr(err, "creating database schema")
 	}
 	// init config table
-	sctx := SQLiteStoreCtx{_db: store.db, mutex: &store.mutex, ctx: ctx}
+	sctx := SQLiteStoreCtx{_db: store.db, ctx: ctx}
 	err = sctx.doTxn("init config", func(tx *sql.Tx) error {
 		config := tx.QueryRow("SELECT dayc,last FROM config LIMIT 1")
 		var dayc int64
@@ -126,9 +123,8 @@ func (s *SQLiteStore) Close() {
 
 func (s *SQLiteStore) WithCtx(ctx context.Context) spec.StoreCtx {
 	return &SQLiteStoreCtx{
-		_db:   s.db,
-		mutex: &s.mutex,
-		ctx:   ctx,
+		_db: s.db,
+		ctx: ctx,
 	}
 }
 
@@ -147,8 +143,6 @@ func IsConflict(err error) bool {
 }
 
 func (s SQLiteStoreCtx) doTxn(name string, work func(tx *sql.Tx) error) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
 	db := s._db
 	limit := 120
 	for {

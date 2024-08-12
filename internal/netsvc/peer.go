@@ -189,7 +189,7 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	// Add the peer to our database (update peer info for known peer)
 	log.Printf("[%s] started adding node: %v %v", who, peerAddr, hexpub)
 	isnew, err := peer.store.AddNetNode(msg.PubKey, peerAddr, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
-	log.Printf("[%s] finished adding node: %v %v", who, peerAddr, hexpub)
+	log.Printf("[%s] finished adding node: %v%v%v", who, hexpub, hex.EncodeToString(msg.Signature), hex.EncodeToString(msg.Payload))
 	if err != nil {
 		return
 	}
@@ -238,7 +238,6 @@ func (peer *peerConn) sendMyAddress(conn net.Conn) {
 		Port:    peer.addr.Port,
 		Channels: []dnet.Tag4CC{
 			dnet.ChannelIdentity,
-			dnet.ChannelB0rk,
 		},
 		Services: []node.Service{
 			{Tag: dnet.ServiceCore, Port: 22556, Data: ""},
