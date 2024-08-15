@@ -137,7 +137,7 @@ func main() {
 
 	// stay connected to local node if specified.
 	if core.IsValid() {
-		gov.Add("local-node", collector.New(db, core, 0, true))
+		gov.Add("local-node", collector.New(db, core, 60*time.Second, true))
 	}
 
 	// start crawling Core Nodes.

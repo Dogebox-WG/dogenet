@@ -377,10 +377,10 @@ func (s SQLiteStoreCtx) TrimNodes() (advanced bool, remCore int64, remNode int64
 	return
 }
 
-func (s SQLiteStoreCtx) AddCoreNode(address Address, time int64, services uint64) error {
+func (s SQLiteStoreCtx) AddCoreNode(address Address, unixTimeSec int64, services uint64) error {
 	return s.doTxn("AddCoreNode", func(tx *sql.Tx) error {
 		addrKey := address.ToBytes()
-		res, err := tx.Exec("UPDATE core SET time=?, services=?, dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE address=?", addrKey)
+		res, err := tx.Exec("UPDATE core SET time=?, services=?, dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE address=?", unixTimeSec, services, addrKey)
 		if err != nil {
 			return fmt.Errorf("update: %v", err)
 		}
@@ -390,7 +390,7 @@ func (s SQLiteStoreCtx) AddCoreNode(address Address, time int64, services uint64
 		}
 		if num == 0 {
 			_, e := tx.Exec("INSERT INTO core (address, time, services, isnew, dayc) VALUES (?1,?2,?3,true,30+(SELECT dayc FROM config LIMIT 1))",
-				addrKey, time, services)
+				addrKey, unixTimeSec, services)
 			if e != nil {
 				return fmt.Errorf("insert: %v", e)
 			}
@@ -400,14 +400,37 @@ func (s SQLiteStoreCtx) AddCoreNode(address Address, time int64, services uint64
 }
 
 func (s SQLiteStoreCtx) UpdateCoreTime(address Address) (err error) {
-	err = s.doTxn("UpdateCoreTime", func(tx *sql.Tx) error {
+	return s.doTxn("UpdateCoreTime", func(tx *sql.Tx) error {
+		addrKey := address.ToBytes()
+		unixTimeSec := time.Now().Unix()
+		_, err := tx.Exec("UPDATE core SET time=?, dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE address=?", unixTimeSec, addrKey)
+		if err != nil {
+			return fmt.Errorf("update: %v", err)
+		}
 		return nil
 	})
-	return
 }
 
 func (s SQLiteStoreCtx) ChooseCoreNode() (res Address, err error) {
 	err = s.doTxn("ChooseCoreNode", func(tx *sql.Tx) error {
+		row := tx.QueryRow("SELECT address FROM core WHERE isnew=TRUE ORDER BY RANDOM() LIMIT 1")
+		var addr []byte
+		err := row.Scan(&addr)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				row = tx.QueryRow("SELECT address FROM core WHERE isnew=FALSE ORDER BY RANDOM() LIMIT 1")
+				err = row.Scan(&addr)
+				if err != nil {
+					return fmt.Errorf("query-not-new: %v", err)
+				}
+			} else {
+				return fmt.Errorf("query-is-new: %v", err)
+			}
+		}
+		res, err = dnet.AddressFromBytes(addr)
+		if err != nil {
+			return fmt.Errorf("invalid address: %v", err)
+		}
 		return nil
 	})
 	return
@@ -508,6 +531,10 @@ func (s SQLiteStoreCtx) AddNetNode(key spec.PubKey, address Address, time int64,
 
 func (s SQLiteStoreCtx) UpdateNetTime(key spec.PubKey) (err error) {
 	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
+		_, e := tx.Exec("UPDATE node SET dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE key=?", key)
+		if e != nil {
+			return fmt.Errorf("update: %v", e)
+		}
 		return nil
 	})
 	return
@@ -515,6 +542,20 @@ func (s SQLiteStoreCtx) UpdateNetTime(key spec.PubKey) (err error) {
 
 func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
+		row := tx.QueryRow("SELECT key,address FROM node ORDER BY RANDOM() LIMIT 1")
+		var addr []byte
+		err := row.Scan(&res.PubKey, &addr)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			} else {
+				return fmt.Errorf("query: %v", err)
+			}
+		}
+		res.Addr, err = dnet.AddressFromBytes(addr)
+		if err != nil {
+			return fmt.Errorf("invalid address: %v", err)
+		}
 		return nil
 	})
 	return

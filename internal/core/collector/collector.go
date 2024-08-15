@@ -142,6 +142,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 	}
 
 	addresses := 0
+	total := 0
 	for {
 		cmd, payload, err := msg.ReadMessage(reader)
 		if err != nil {
@@ -185,10 +186,18 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 			}
 			fmt.Printf("[%s] Addresses: %d received, %d expired, %d new, %d in DB\n", who, len(addr.AddrList), len(addr.AddrList)-kept, (newLen - oldLen), dbSize)
 			addresses += len(addr.AddrList)
-			if addresses >= 1001 {
+			total += (newLen - oldLen)
+			if addresses >= 1000 {
 				// done: try the next node (or reconnect to local node)
 				// a node will only respond once to the 'addr' request
 				conn.Close()
+				// back off as the number of kept nodes falls towards zero
+				wait := 60 - total
+				if wait < 1 {
+					wait = 1
+				}
+				fmt.Printf("[%s] Sleeping for %v\n", who, wait)
+				c.Sleep(time.Duration(wait) * time.Second)
 				return
 			}
 

@@ -4,7 +4,7 @@ import "code.dogecoin.org/gossip/codec"
 
 // NetAddr represents the structure of a network address
 type NetAddr struct {
-	Time     uint32 // if version >= 31402; not present in version message
+	Time     uint32 // Unix epoch time seconds, if version >= 31402; not present in version message
 	Services uint64 // Services bit flags
 	Address  []byte // [16] network byte order (BE); IPv4-mapped IPv6 address
 	Port     uint16 // network byte order (BE)

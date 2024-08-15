@@ -8,8 +8,8 @@ import (
 	"code.dogecoin.org/gossip/dnet"
 )
 
-// Keep nodes in the map for 5 days before expiry
-const ExpiryTime = time.Duration(5 * 24 * time.Hour)
+// Keep nodes in the map for 2 days before expiry
+const ExpiryTime = time.Duration(2 * 24 * time.Hour)
 
 // Store is the top-level interface (e.g. SQLiteStore)
 type Store interface {

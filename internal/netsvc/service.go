@@ -156,12 +156,14 @@ func (ns *NetService) attractPeers() {
 			conn, err := d.DialContext(ns.Context, "tcp", node.Addr.String())
 			if err != nil {
 				log.Printf("[%s] connect failed: %v", who, err)
+				ns.Sleep(time.Second)
 			} else {
 				peer := newPeer(conn, node.Addr, node.PubKey, ns) // outbound connection (have PeerPub)
 				if ns.trackPeer(peer) {
 					log.Printf("[%s] connected to peer (outbound): %v [%v]", who, node.Addr, pubHex)
 					peer.start()
-					continue
+					// the peer disconnected (or we dropped them)
+					ns.Sleep(time.Second)
 				} else { // Stop was called
 					conn.Close()
 					return
