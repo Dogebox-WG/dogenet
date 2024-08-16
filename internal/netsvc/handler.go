@@ -59,7 +59,7 @@ func (hand *handlerConn) receiveFromHandler() {
 		}
 		// forward the message to all peers (ignore channel here)
 		log.Printf("[%s] received from handler: %v %v", hand.name, msg.Chan, msg.Tag)
-		hand.ns.forwardToPeers(msg.RawHdr, msg.Payload)
+		hand.ns.forwardToPeers(RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
 	}
 }
 

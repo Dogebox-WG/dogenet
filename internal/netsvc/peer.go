@@ -18,7 +18,11 @@ import (
 
 const OldestTime = -((30 * 24) + 1) * time.Hour // 30 days + 1 hour into the past
 const NewestTime = 1 * time.Hour                // 1 hour into the future
-const GossipAddressInverval = 5 * time.Minute   // 1 hour will do (or 24 hours)
+const GossipAddressInverval = 89 * time.Second  // gossip a random address to the peer
+const PingInverval = 60 * time.Second           // send a Ping periodically
+
+var TagPing = dnet.NewTag("Ping")
+var TagPong = dnet.NewTag("Pong")
 
 // Peer connections exchange messages with a remote peer;
 // forward received messages to channel owners,
@@ -33,12 +37,12 @@ type peerConn struct {
 	receive    map[dnet.Tag4CC]chan dnet.Message
 	send       chan RawMessage // raw message
 	mutex      sync.Mutex
-	sendAddr   *time.Timer
+	addrTimer  *time.Ticker
+	pingTimer  *time.Ticker
 	addr       spec.Address // Peer's public address
 	peerPub    [32]byte     // Peer's pubkey (pre-set for outbound;  inbound connections
 	nodeKey    dnet.KeyPair // [const] to sign `Addr` messages (key for THIS node)
 	publicAddr spec.Address // [const] to include in `Addr` messages (address of THIS node)
-	idenPub    dnet.PubKey  // [const] to include in `Addr` messages (pubkey of THIS node's owner)
 }
 
 func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, ns *NetService) *peerConn {
@@ -50,12 +54,12 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, 
 		isOutbound: outbound,
 		receive:    make(map[dnet.Tag4CC]chan dnet.Message),
 		send:       make(chan RawMessage, 100),
-		sendAddr:   time.NewTimer(GossipAddressInverval),
+		addrTimer:  time.NewTicker(GossipAddressInverval),
+		pingTimer:  time.NewTicker(PingInverval),
 		addr:       addr,
 		peerPub:    peerPub,
 		nodeKey:    ns.nodeKey,
 		publicAddr: ns.publicAddr,
-		idenPub:    ns.idenPub,
 	}
 	return peer
 }
@@ -186,6 +190,14 @@ func (peer *peerConn) receiveFromPeer(who string) {
 						return
 					}
 				}
+			} else if msg.Tag == TagPing {
+				msg := dnet.EncodeMessage(node.ChannelNode, TagPong, peer.nodeKey, []byte{})
+				_, err := peer.conn.Write(msg)
+				if err != nil {
+					log.Printf("[%s] failed to send pong to peer: %v", who, err)
+					peer.ns.closePeer(peer)
+					return
+				}
 			} else {
 				log.Printf("[%s] ignored unknown [Node] message: [%v]", who, msg.Tag)
 			}
@@ -232,7 +244,7 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	isnew, err := peer.store.AddNetNode(msg.PubKey, peerAddr, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
 	if isnew {
 		// re-broadcast the `Addr` message to all connected peers
-		peer.ns.forwardToPeers(msg.RawHdr, msg.Payload)
+		peer.ns.forwardToPeers(RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
 	}
 	return
 }
@@ -264,12 +276,18 @@ func (peer *peerConn) sendToPeer(who string) {
 				peer.ns.closePeer(peer)
 				return
 			}
-		case <-peer.sendAddr.C:
-			peer.sendAddr = time.NewTimer(GossipAddressInverval)
-			log.Printf("[%s] <- announcing my address", who)
-			err := peer.sendMyAddress(conn)
+		case <-peer.addrTimer.C:
+			log.Printf("[%s] <- gossip a random address (TODO)", who)
+			// if err != nil {
+			// 	log.Printf("[%s] failed to gossip [Node][Addr] to peer: %v", who, err)
+			// 	peer.ns.closePeer(peer)
+			// 	return
+			// }
+		case <-peer.pingTimer.C:
+			msg := dnet.EncodeMessage(node.ChannelNode, TagPing, peer.nodeKey, []byte{})
+			_, err := peer.conn.Write(msg)
 			if err != nil {
-				log.Printf("[%s] failed to send [Node][Addr] to peer: %v", who, err)
+				log.Printf("[%s] failed to send ping to peer: %v", who, err)
 				peer.ns.closePeer(peer)
 				return
 			}
@@ -277,6 +295,8 @@ func (peer *peerConn) sendToPeer(who string) {
 			// shutting down
 			// no race: peer.peerPub is final before sendToPeer starts (closePeer OK to read peer.peerPub)
 			peer.ns.closePeer(peer)
+			peer.addrTimer.Stop()
+			peer.pingTimer.Stop()
 			return
 		}
 	}
@@ -284,18 +304,11 @@ func (peer *peerConn) sendToPeer(who string) {
 
 // runs on receiveFromPeer
 func (peer *peerConn) sendMyAddress(conn net.Conn) error {
-	addr := node.AddressMsg{
-		Time:    dnet.DogeNow(),
-		Address: peer.publicAddr.Host.To16(), // nil edge-case if invalid
-		Port:    peer.publicAddr.Port,
-		Channels: []dnet.Tag4CC{
-			dnet.ChannelIdentity,
-		},
-		Services: []node.Service{
-			{Tag: dnet.ServiceCore, Port: 22556, Data: ""},
-		},
+	msg := peer.ns.GetAnnounce()
+	_, err := conn.Write(msg.Header)
+	if err != nil {
+		return err
 	}
-	addr.Owner = peer.idenPub // shared!
-	_, err := conn.Write(dnet.EncodeMessage(dnet.ChannelNode, node.TagAddress, peer.nodeKey, addr.Encode()))
+	_, err = conn.Write(msg.Payload)
 	return err
 }

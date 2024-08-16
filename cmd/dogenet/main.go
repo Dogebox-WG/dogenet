@@ -144,7 +144,7 @@ func main() {
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
-	netSvc := netsvc.New(binds, public, db, nodeKey, idenPub, allowLocal)
+	netSvc := netsvc.New(binds, public, idenPub, db, nodeKey, allowLocal)
 	gov.Add("gossip", netSvc)
 
 	// stay connected to local node if specified.

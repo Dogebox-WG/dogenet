@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS config (
 CREATE TABLE IF NOT EXISTS announce (
 	payload BLOB NOT NULL,
 	sig BLOB NOT NULL,
-	time DATETIME NOT NULL
+	time INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS core (
 	address BLOB NOT NULL PRIMARY KEY,
@@ -445,7 +445,7 @@ func (s SQLiteStoreCtx) SampleCoreNodes() (res []Address, err error) {
 
 func (s SQLiteStoreCtx) GetAnnounce() (payload []byte, sig []byte, time int64, err error) {
 	err = s.doTxn("GetAnnounce", func(tx *sql.Tx) error {
-		row := tx.QueryRow("SELECT payload,sig,time FROM announce LIMIT 1")
+		row := tx.QueryRow("SELECT payload, sig, time FROM announce LIMIT 1")
 		e := row.Scan(&payload, &sig, &time)
 		if e != nil {
 			if !errors.Is(e, sql.ErrNoRows) {

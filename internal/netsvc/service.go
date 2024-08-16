@@ -1,6 +1,7 @@
 package netsvc
 
 import (
+	"bytes"
 	"encoding/hex"
 	"log"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"code.dogecoin.org/gossip/dnet"
+	"code.dogecoin.org/gossip/node"
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -18,6 +20,8 @@ import (
 const IdealPeers = 8
 const ProtocolSocket = "/tmp/dogenet.sock"
 const PeerLockTime = 300 * time.Second // 5 minutes
+// const AnnounceLongevity = 24 * time.Hour
+const AnnounceLongevity = 5 * time.Minute
 
 type NetService struct {
 	governor.ServiceCtx
@@ -31,12 +35,14 @@ type NetService struct {
 	store          spec.Store
 	cstore         spec.StoreCtx
 	nodeKey        dnet.KeyPair
-	idenPub        dnet.PubKey
 	connections    []net.Conn
 	lockedPeers    map[[32]byte]time.Time
 	connectedPeers map[[32]byte]*peerConn
 	handlers       []*handlerConn
 	newPeers       chan spec.NodeInfo
+	addrChange     chan node.AddressMsg // input to updateAnnounce()
+	nextAnnounce   node.AddressMsg      // public address, owner pubkey, channels, services (owned by updateAnnounce)
+	encAnnounce    RawMessage           // current encoded announcement, ready for sending to peers (mutex)
 }
 
 type RawMessage struct {
@@ -46,18 +52,27 @@ type RawMessage struct {
 
 var NoPubKey [32]byte // zeroes
 
-func New(bind []spec.Address, pubAddr spec.Address, store spec.Store, nodeKey dnet.KeyPair, idenPub spec.PubKey, allowLocal bool) spec.NetSvc {
+func New(bind []spec.Address, public spec.Address, idenPub dnet.PubKey, store spec.Store, nodeKey dnet.KeyPair, allowLocal bool) spec.NetSvc {
 	return &NetService{
 		bindAddrs:      bind,
-		publicAddr:     pubAddr,
 		allowLocal:     allowLocal,
 		channels:       make(map[dnet.Tag4CC]chan dnet.Message),
 		store:          store,
 		nodeKey:        nodeKey,
-		idenPub:        idenPub,
 		lockedPeers:    make(map[[32]byte]time.Time),
 		connectedPeers: make(map[[32]byte]*peerConn),
 		newPeers:       make(chan spec.NodeInfo, 10),
+		nextAnnounce: node.AddressMsg{
+			// Time: is dynamically updated
+			Address: public.Host.To16(),
+			Port:    public.Port,
+			Owner:   idenPub,
+			// Channels: are dynamically updated
+			Services: []node.Service{
+				// XXX this needs to be a config option (public Core Node address)
+				{Tag: dnet.ServiceCore, Port: 22556},
+			},
+		},
 	}
 }
 
@@ -68,6 +83,7 @@ func (ns *NetService) Run() {
 	ns.startListeners(&wg)
 	go ns.acceptHandlers()
 	go ns.findPeers()
+	go ns.updateAnnounce()
 	wg.Wait()
 }
 
@@ -80,7 +96,7 @@ func (ns *NetService) AddPeer(node spec.NodeInfo) {
 
 // on 'Run' goroutine
 func (ns *NetService) startListeners(wg *sync.WaitGroup) {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs Stop
 	defer ns.mutex.Unlock()
 	for _, b := range ns.bindAddrs {
 		lc := net.ListenConfig{
@@ -212,9 +228,96 @@ func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 	return spec.NodeInfo{}
 }
 
+// called from any peer
+func (ns *NetService) GetAnnounce() RawMessage {
+	ns.mutex.Lock() // vs setAnnounce
+	defer ns.mutex.Unlock()
+	return ns.encAnnounce
+}
+
+func (ns *NetService) setAnnounce(msg RawMessage) {
+	ns.mutex.Lock() // vs getAnnounce
+	defer ns.mutex.Unlock()
+	ns.encAnnounce = msg
+}
+
+// goroutine
+func (ns *NetService) updateAnnounce() {
+	msg, remain := ns.loadOrGenerateAnnounce()
+	ns.setAnnounce(msg)
+	timer := time.NewTimer(remain)
+	for !ns.Stopping() {
+		select {
+		case newMsg := <-ns.addrChange:
+			// whenever the node's address or channels change, gossip a new announcement.
+			ns.nextAnnounce = newMsg
+			log.Printf("[announce] received new address information")
+			msg, remain := ns.generateAnnounce(newMsg)
+			ns.setAnnounce(msg)
+			log.Printf("[announce] sending announcement to all peers")
+			ns.forwardToPeers(msg)
+			// restart the timer
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(remain)
+
+		case <-timer.C:
+			// every 24 hours, re-sign and gossip the announcement.
+			msg, remain := ns.generateAnnounce(ns.nextAnnounce)
+			ns.setAnnounce(msg)
+			log.Printf("[announce] sending announcement to all peers")
+			ns.forwardToPeers(msg)
+			// restart the timer
+			timer.Reset(remain)
+
+		case <-ns.Context.Done():
+			timer.Stop()
+			return
+		}
+	}
+}
+
+func (ns *NetService) loadOrGenerateAnnounce() (RawMessage, time.Duration) {
+	// load the stored announcement from the database
+	oldPayload, sig, expires, err := ns.cstore.GetAnnounce()
+	now := time.Now().Unix()
+	if err != nil {
+		log.Printf("[announce] cannot load announcement: %v", err)
+	} else if len(oldPayload) >= node.AddrMsgMinSize && len(sig) == 64 && now < expires {
+		// determine if the announcement we stored is the same as the announcement
+		// we would produce now; if so, avoid gossiping a new announcement
+		oldMsg := node.DecodeAddrMsg(oldPayload) // for Time
+		newMsg := ns.nextAnnounce                // copy
+		newMsg.Time = oldMsg.Time                // ignore Time for Equals()
+		if bytes.Equal(newMsg.Encode(), oldPayload) {
+			// re-encode the stored announcement
+			log.Printf("[announce] re-using stored announcement for %v seconds", expires-now)
+			hdr := dnet.ReEncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey.Pub, sig, oldPayload)
+			return RawMessage{Header: hdr, Payload: oldPayload}, time.Duration(expires-now) * time.Second
+		}
+	}
+	// create a new announcement and store it
+	return ns.generateAnnounce(ns.nextAnnounce)
+}
+
+func (ns *NetService) generateAnnounce(newMsg node.AddressMsg) (RawMessage, time.Duration) {
+	log.Printf("[announce] signing a new announcement")
+	now := time.Now()
+	newMsg.Time = dnet.UnixToDoge(now)
+	payload := newMsg.Encode()
+	msg := dnet.EncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey, payload)
+	view := dnet.MsgView(msg)
+	err := ns.cstore.SetAnnounce(payload, view.Signature(), now.Add(AnnounceLongevity).Unix())
+	if err != nil {
+		log.Printf("[announce] cannot store announcement: %v", err)
+	}
+	return RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity
+}
+
 // called from any
 func (ns *NetService) Stop() {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs startListeners, acceptHandlers, any track/close
 	defer ns.mutex.Unlock()
 	// stop accepting network connections
 	for _, listner := range ns.listen {
@@ -232,13 +335,13 @@ func (ns *NetService) Stop() {
 }
 
 // called from any
-func (ns *NetService) forwardToPeers(rawHdr []byte, payload []byte) {
-	ns.mutex.Lock()
+func (ns *NetService) forwardToPeers(msg RawMessage) {
+	ns.mutex.Lock() // vs countPeers,havePeer,trackPeer,adoptPeer,closePeer
 	defer ns.mutex.Unlock()
 	for _, peer := range ns.connectedPeers {
 		// non-blocking send to peer
 		select {
-		case peer.send <- RawMessage{Header: rawHdr, Payload: payload}:
+		case peer.send <- msg:
 		default:
 		}
 	}
@@ -246,7 +349,7 @@ func (ns *NetService) forwardToPeers(rawHdr []byte, payload []byte) {
 
 // called from any
 func (ns *NetService) forwardToHandlers(channel dnet.Tag4CC, rawHdr []byte, payload []byte) bool {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs trackHandler,closeHandler
 	defer ns.mutex.Unlock()
 	found := false
 	for _, hand := range ns.handlers {
@@ -268,7 +371,7 @@ func (ns *NetService) forwardToHandlers(channel dnet.Tag4CC, rawHdr []byte, payl
 
 // called from attractPeers
 func (ns *NetService) countPeers() int {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs havePeer,trackPeer,adoptPeer,closePeer,forwardToPeers
 	defer ns.mutex.Unlock()
 	return len(ns.connectedPeers)
 }
@@ -277,7 +380,7 @@ func (ns *NetService) countPeers() int {
 // this prevents connecting to the same peer over and over
 // called from attractPeers
 func (ns *NetService) lockPeer(pubKey [32]byte) bool {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs ?? (lockedPeers is private to findPeers)
 	defer ns.mutex.Unlock()
 	now := time.Now()
 	if until, have := ns.lockedPeers[pubKey]; have {
@@ -293,7 +396,7 @@ func (ns *NetService) lockPeer(pubKey [32]byte) bool {
 // havePeer returns true if we're already connected to a peer with pubKey
 // called from attractPeers
 func (ns *NetService) havePeer(pubKey [32]byte) bool {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs countPeers,trackPeer,adoptPeer,closePeer,forwardToPeers
 	defer ns.mutex.Unlock()
 	_, have := ns.connectedPeers[pubKey]
 	return have
@@ -303,7 +406,7 @@ func (ns *NetService) havePeer(pubKey [32]byte) bool {
 // called from any
 // returns false if service is stopping
 func (ns *NetService) trackPeer(conn net.Conn, peer *peerConn, pubKey [32]byte) bool {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs countPeers,havePeer,adoptPeer,closePeer,forwardToPeers,Stop
 	defer ns.mutex.Unlock()
 	if ns.Stopping() {
 		return false
@@ -324,7 +427,7 @@ func (ns *NetService) trackPeer(conn net.Conn, peer *peerConn, pubKey [32]byte) 
 // adoptPeer sets peer's PubKey if we're not already connected to that peer
 // called from any peer.receiveFromPeer
 func (ns *NetService) adoptPeer(peer *peerConn, pubKey [32]byte) bool {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs countPeers,havePeer,trackPeer,closePeer,forwardToPeers
 	defer ns.mutex.Unlock()
 	if _, have := ns.connectedPeers[pubKey]; have {
 		return false // already connected to peer
@@ -338,9 +441,10 @@ func (ns *NetService) adoptPeer(peer *peerConn, pubKey [32]byte) bool {
 func (ns *NetService) closePeer(peer *peerConn) {
 	conn := peer.conn
 	conn.Close()
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs countPeers,havePeer,trackPeer,adoptPeer,forwardToPeers,Stop
 	defer ns.mutex.Unlock()
 	// remove the peer connected status
+	log.Printf("[%v] closing connection to peer: %v", peer.addr.String(), hex.EncodeToString(peer.peerPub[:]))
 	key := peer.peerPub
 	if p, have := ns.connectedPeers[key]; have && p == peer {
 		delete(ns.connectedPeers, key)
@@ -360,7 +464,7 @@ func (ns *NetService) closePeer(peer *peerConn) {
 // called from any
 // returns false if service is stopping
 func (ns *NetService) trackHandler(conn net.Conn, hand *handlerConn) bool {
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs closeHandler,forwardToHandlers,Stop
 	defer ns.mutex.Unlock()
 	if ns.Stopping() {
 		return false
@@ -376,7 +480,7 @@ func (ns *NetService) trackHandler(conn net.Conn, hand *handlerConn) bool {
 func (ns *NetService) closeHandler(hand *handlerConn) {
 	conn := hand.conn
 	conn.Close()
-	ns.mutex.Lock()
+	ns.mutex.Lock() // vs trackHandler,forwardToHandlers,Stop
 	defer ns.mutex.Unlock()
 	// remove the tracked connnection
 	for i, c := range ns.connections {
