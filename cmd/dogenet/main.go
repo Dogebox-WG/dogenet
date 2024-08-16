@@ -28,6 +28,7 @@ const StoreFilename = "storage/dogenet.db"
 
 func main() {
 	var crawl int
+	var allowLocal bool
 	binds := []dnet.Address{}
 	bindweb := []dnet.Address{}
 	public := dnet.Address{}
@@ -37,6 +38,7 @@ func main() {
 
 	flag.IntVar(&crawl, "crawl", 0, "number of core node crawlers")
 	flag.StringVar(&dbfile, "db", StoreFilename, "path to SQLite database")
+	flag.BoolVar(&allowLocal, "local", false, "allow local 'public' addresses (for testing)")
 	flag.Func("bind", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		addr, err := parseIPPort(arg, "bind", dnet.DogeNetDefaultPort)
 		if err != nil {
@@ -54,6 +56,8 @@ func main() {
 		return nil
 	})
 	flag.Func("public", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		// use DogeNetDefaultPort by default (rather than the --bind port)
+		// this is typically correct even if bind-port is something different
 		addr, err := parseIPPort(arg, "public", dnet.DogeNetDefaultPort)
 		if err != nil {
 			return err
@@ -83,7 +87,7 @@ func main() {
 			return err
 		}
 		peers = append(peers, spec.NodeInfo{
-			PubKey: pub,
+			PubKey: ([32]byte)(pub),
 			Addr:   addr,
 		})
 		return nil
@@ -116,6 +120,14 @@ func main() {
 			Port: WebAPIDefaultPort,
 		})
 	}
+	if !public.IsValid() {
+		log.Printf("node public address must be specified via --public")
+		os.Exit(1)
+	}
+	if !allowLocal && (!public.Host.IsGlobalUnicast() || public.Host.IsPrivate()) {
+		log.Printf("bad --public address: cannot be a private or multicast address")
+		os.Exit(1)
+	}
 
 	// get the private key from the KEY env-var
 	nodeKey, idenPub := keysFromEnv()
@@ -132,7 +144,7 @@ func main() {
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
-	netSvc := netsvc.New(binds, public, db, nodeKey, idenPub)
+	netSvc := netsvc.New(binds, public, db, nodeKey, idenPub, allowLocal)
 	gov.Add("gossip", netSvc)
 
 	// stay connected to local node if specified.

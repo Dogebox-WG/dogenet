@@ -16,7 +16,7 @@ type handlerConn struct {
 	conn    net.Conn
 	channel uint32 // for atomic.Load
 	receive map[dnet.Tag4CC]chan dnet.Message
-	send    chan []byte // raw message
+	send    chan RawMessage
 	name    string
 }
 
@@ -25,7 +25,7 @@ func newHandler(conn net.Conn, ns *NetService) *handlerConn {
 		ns:      ns,
 		conn:    conn,
 		receive: make(map[dnet.Tag4CC]chan dnet.Message),
-		send:    make(chan []byte),
+		send:    make(chan RawMessage),
 		name:    "protocol-handler",
 	}
 	return hand
@@ -59,7 +59,7 @@ func (hand *handlerConn) receiveFromHandler() {
 		}
 		// forward the message to all peers (ignore channel here)
 		log.Printf("[%s] received from handler: %v %v", hand.name, msg.Chan, msg.Tag)
-		hand.ns.forwardToPeers(msg.RawMsg)
+		hand.ns.forwardToPeers(msg.RawHdr, msg.Payload)
 	}
 }
 
@@ -87,9 +87,15 @@ func (hand *handlerConn) sendToHandler() {
 		select {
 		case raw := <-send:
 			// forward the raw message to the handler
-			cha, tag := dnet.MsgView(raw).ChanTag()
+			cha, tag := dnet.MsgView(raw.Header).ChanTag()
 			log.Printf("[%s] sending to handler: %v %v", hand.name, cha, tag)
-			_, err := conn.Write(raw)
+			_, err := conn.Write(raw.Header)
+			if err != nil {
+				log.Printf("[%s] cannot send to handler: %v", hand.name, err)
+				hand.ns.closeHandler(hand)
+				return
+			}
+			_, err = conn.Write(raw.Payload)
 			if err != nil {
 				log.Printf("[%s] cannot send to handler: %v", hand.name, err)
 				hand.ns.closeHandler(hand)

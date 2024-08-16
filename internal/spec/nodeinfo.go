@@ -1,10 +1,10 @@
 package spec
 
 type NodeInfo struct {
-	PubKey []byte // 32 bytes
+	PubKey [32]byte
 	Addr   Address
 }
 
 func (n NodeInfo) IsValid() bool {
-	return len(n.PubKey) == 32 && n.Addr.IsValid()
+	return n.Addr.IsValid()
 }

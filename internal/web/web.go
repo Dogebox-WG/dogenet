@@ -159,7 +159,7 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// attempt to connect to the peer (soonish)
-		a.netSvc.AddPeer(pub, addr)
+		a.netSvc.AddPeer(spec.NodeInfo{PubKey: ([32]byte)(pub), Addr: addr})
 		log.Printf("added peer: %v %v %v", hex.EncodeToString(pub), addr.Host, addr.Port)
 
 		// response

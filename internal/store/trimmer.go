@@ -23,7 +23,7 @@ type StoreTrimmer struct {
 func (sv *StoreTrimmer) Run() {
 	store := sv.store.WithCtx(sv.Context)
 	for {
-		if sv.Sleep(1 * time.Minute) { // once an hour is enough
+		if sv.Sleep(1 * time.Hour) { // once an hour is enough
 			return // stopping
 		}
 		advanced, remCore, remNode, err := store.TrimNodes()

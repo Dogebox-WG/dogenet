@@ -543,8 +543,9 @@ func (s SQLiteStoreCtx) UpdateNetTime(key spec.PubKey) (err error) {
 func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
 		row := tx.QueryRow("SELECT key,address FROM node ORDER BY RANDOM() LIMIT 1")
+		var key []byte
 		var addr []byte
-		err := row.Scan(&res.PubKey, &addr)
+		err := row.Scan(&key, &addr)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
@@ -552,6 +553,10 @@ func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 				return fmt.Errorf("query: %v", err)
 			}
 		}
+		if len(key) != 32 {
+			return fmt.Errorf("invalid node key: %v (should be 32 bytes)", hex.EncodeToString(key))
+		}
+		res.PubKey = ([32]byte)(key)
 		res.Addr, err = dnet.AddressFromBytes(addr)
 		if err != nil {
 			return fmt.Errorf("invalid address: %v", err)

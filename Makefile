@@ -8,10 +8,10 @@ dogenet: clean
 	go build -o dogenet ./cmd/dogenet/. 
 
 dev1:
-	KEY=$(shell cat dev-key1) IDENT=$(shell cat ident-pub1) go run ./cmd/dogenet --db storage/dev1.db --bind 127.0.0.1:8096 --web 127.0.0.1:8086
+	KEY=$(shell cat dev-key1) IDENT=$(shell cat ident-pub1) go run ./cmd/dogenet --db storage/dev1.db --local --public 127.0.0.1:8096 --bind 127.0.0.1:8096 --web 127.0.0.1:8086
 
 dev:
-	KEY=$(shell cat dev-key) IDENT=$(shell cat ident-pub) go run ./cmd/dogenet
+	KEY=$(shell cat dev-key) IDENT=$(shell cat ident-pub) go run ./cmd/dogenet --local --public 127.0.0.1
 
 key:
 	go run ./cmd/dogenet genkey

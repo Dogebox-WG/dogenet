@@ -6,5 +6,5 @@ import (
 
 type NetSvc interface {
 	governor.Service
-	AddPeer(pubKey PubKey, addr Address)
+	AddPeer(node NodeInfo)
 }
