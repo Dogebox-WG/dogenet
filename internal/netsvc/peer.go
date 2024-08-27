@@ -198,7 +198,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 					peer.ns.closePeer(peer)
 					return
 				}
-			} else {
+			} else if msg.Tag != TagPong {
 				log.Printf("[%s] ignored unknown [Node] message: [%v]", who, msg.Tag)
 			}
 		} else {
