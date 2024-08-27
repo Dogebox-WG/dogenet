@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"code.dogecoin.org/gossip/dnet"
-	"code.dogecoin.org/gossip/node"
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -22,24 +21,25 @@ const PeerLockTime = 300 * time.Second // 5 minutes
 
 type NetService struct {
 	governor.ServiceCtx
-	bindAddrs      []spec.Address // bind-to address on THIS node
-	publicAddr     spec.Address   // public address of THIS node
-	allowLocal     bool
+	bindAddrs  []spec.Address // bind-to address on THIS node
+	publicAddr spec.Address   // public address of THIS node
+	allowLocal bool           // allow local IP address in Announcement messages (for local testing)
+	store      spec.Store
+	cstore     spec.StoreCtx
+	nodeKey    dnet.KeyPair
+	newPeers   chan spec.NodeInfo
+	// MUTEX state:
 	mutex          sync.Mutex
-	listen         []net.Listener
-	socket         net.Listener
-	channels       map[dnet.Tag4CC]chan dnet.Message
-	store          spec.Store
-	cstore         spec.StoreCtx
-	nodeKey        dnet.KeyPair
-	connections    []net.Conn
-	lockedPeers    map[[32]byte]time.Time
-	connectedPeers map[[32]byte]*peerConn
-	handlers       []*handlerConn
-	newPeers       chan spec.NodeInfo
-	nextAnnounce   node.AddressMsg // public address, owner pubkey, channels, services (owned by updateAnnounce)
-	encAnnounce    spec.RawMessage // current encoded announcement, ready for sending to peers (mutex)
+	connections    []net.Conn              // all current network connections (peers and handlers)
+	listen         []net.Listener          // listen sockets for peers to connect
+	connectedPeers map[MapPubKey]*peerConn // currently connected peers by pubkey
+	lockedPeers    map[MapPubKey]time.Time // peer pubkeys locked for a short time during connection attempts
+	socket         net.Listener            // listen socket for handlers to connect
+	handlers       []*handlerConn          // currently connected handlers
+	encAnnounce    spec.RawMessage         // current encoded announcement, ready for sending to peers (mutex)
 }
+
+type MapPubKey = [32]byte
 
 var NoPubKey [32]byte // zeroes
 
@@ -47,23 +47,11 @@ func New(bind []spec.Address, public spec.Address, idenPub dnet.PubKey, store sp
 	return &NetService{
 		bindAddrs:      bind,
 		allowLocal:     allowLocal,
-		channels:       make(map[dnet.Tag4CC]chan dnet.Message),
 		store:          store,
 		nodeKey:        nodeKey,
-		lockedPeers:    make(map[[32]byte]time.Time),
-		connectedPeers: make(map[[32]byte]*peerConn),
+		lockedPeers:    make(map[MapPubKey]time.Time),
+		connectedPeers: make(map[MapPubKey]*peerConn),
 		newPeers:       make(chan spec.NodeInfo, 10),
-		nextAnnounce: node.AddressMsg{
-			// Time: is dynamically updated
-			Address: public.Host.To16(),
-			Port:    public.Port,
-			Owner:   idenPub,
-			// Channels: are dynamically updated
-			Services: []node.Service{
-				// XXX this needs to be a config option (public Core Node address)
-				{Tag: dnet.ServiceCore, Port: 22556},
-			},
-		},
 	}
 }
 
@@ -302,7 +290,7 @@ func (ns *NetService) countPeers() int {
 // lockPeer reserves a peer PubKey for PeerLockTime (for connection attempts)
 // this prevents connecting to the same peer over and over
 // called from attractPeers
-func (ns *NetService) lockPeer(pubKey [32]byte) bool {
+func (ns *NetService) lockPeer(pubKey MapPubKey) bool {
 	ns.mutex.Lock() // vs ?? (lockedPeers is private to findPeers)
 	defer ns.mutex.Unlock()
 	now := time.Now()
@@ -318,7 +306,7 @@ func (ns *NetService) lockPeer(pubKey [32]byte) bool {
 
 // havePeer returns true if we're already connected to a peer with pubKey
 // called from attractPeers
-func (ns *NetService) havePeer(pubKey [32]byte) bool {
+func (ns *NetService) havePeer(pubKey MapPubKey) bool {
 	ns.mutex.Lock() // vs countPeers,trackPeer,adoptPeer,closePeer,forwardToPeers
 	defer ns.mutex.Unlock()
 	_, have := ns.connectedPeers[pubKey]
@@ -328,7 +316,7 @@ func (ns *NetService) havePeer(pubKey [32]byte) bool {
 // trackPeer adds a peer to our set of connected peers
 // called from any
 // returns false if service is stopping
-func (ns *NetService) trackPeer(conn net.Conn, peer *peerConn, pubKey [32]byte) bool {
+func (ns *NetService) trackPeer(conn net.Conn, peer *peerConn, pubKey MapPubKey) bool {
 	ns.mutex.Lock() // vs countPeers,havePeer,adoptPeer,closePeer,forwardToPeers,Stop
 	defer ns.mutex.Unlock()
 	if ns.Stopping() {
@@ -349,7 +337,7 @@ func (ns *NetService) trackPeer(conn net.Conn, peer *peerConn, pubKey [32]byte) 
 
 // adoptPeer sets peer's PubKey if we're not already connected to that peer
 // called from any peer.receiveFromPeer
-func (ns *NetService) adoptPeer(peer *peerConn, pubKey [32]byte) bool {
+func (ns *NetService) adoptPeer(peer *peerConn, pubKey MapPubKey) bool {
 	ns.mutex.Lock() // vs countPeers,havePeer,trackPeer,closePeer,forwardToPeers
 	defer ns.mutex.Unlock()
 	if _, have := ns.connectedPeers[pubKey]; have {

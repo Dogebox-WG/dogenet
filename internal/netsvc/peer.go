@@ -50,7 +50,7 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, 
 		ns:         ns,
 		conn:       conn,
 		store:      ns.cstore,
-		allowLocal: ns.allowLocal,
+		allowLocal: ns.allowLocal, // allow local IP address in Announcement messages (for local testing)
 		isOutbound: outbound,
 		receive:    make(map[dnet.Tag4CC]chan dnet.Message),
 		send:       make(chan spec.RawMessage, 100),
@@ -191,6 +191,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 					}
 				}
 			} else if msg.Tag == TagPing {
+				// XXX should encode this once and re-use.
 				msg := dnet.EncodeMessage(node.ChannelNode, TagPong, peer.nodeKey, []byte{})
 				_, err := peer.conn.Write(msg)
 				if err != nil {
@@ -284,6 +285,7 @@ func (peer *peerConn) sendToPeer(who string) {
 			// 	return
 			// }
 		case <-peer.pingTimer.C:
+			// XXX should encode this once and re-use.
 			msg := dnet.EncodeMessage(node.ChannelNode, TagPing, peer.nodeKey, []byte{})
 			_, err := peer.conn.Write(msg)
 			if err != nil {
