@@ -1,7 +1,6 @@
 package netsvc
 
 import (
-	"bytes"
 	"encoding/hex"
 	"log"
 	"net"
@@ -20,8 +19,6 @@ import (
 const IdealPeers = 8
 const ProtocolSocket = "/tmp/dogenet.sock"
 const PeerLockTime = 300 * time.Second // 5 minutes
-// const AnnounceLongevity = 24 * time.Hour
-const AnnounceLongevity = 5 * time.Minute
 
 type NetService struct {
 	governor.ServiceCtx
@@ -40,14 +37,8 @@ type NetService struct {
 	connectedPeers map[[32]byte]*peerConn
 	handlers       []*handlerConn
 	newPeers       chan spec.NodeInfo
-	addrChange     chan node.AddressMsg // input to updateAnnounce()
-	nextAnnounce   node.AddressMsg      // public address, owner pubkey, channels, services (owned by updateAnnounce)
-	encAnnounce    RawMessage           // current encoded announcement, ready for sending to peers (mutex)
-}
-
-type RawMessage struct {
-	Header  []byte // encoded header
-	Payload []byte // message payload
+	nextAnnounce   node.AddressMsg // public address, owner pubkey, channels, services (owned by updateAnnounce)
+	encAnnounce    spec.RawMessage // current encoded announcement, ready for sending to peers (mutex)
 }
 
 var NoPubKey [32]byte // zeroes
@@ -83,7 +74,6 @@ func (ns *NetService) Run() {
 	ns.startListeners(&wg)
 	go ns.acceptHandlers()
 	go ns.findPeers()
-	go ns.updateAnnounce()
 	wg.Wait()
 }
 
@@ -92,6 +82,26 @@ func (ns *NetService) Run() {
 // the peer to the database if connection is successful.
 func (ns *NetService) AddPeer(node spec.NodeInfo) {
 	ns.newPeers <- node
+}
+
+// ReceiveAnnounce implements AnnounceReceiver.
+// Receives signed announcement messages from the Announce service.
+func (ns *NetService) ReceiveAnnounce(msg spec.RawMessage) {
+	ns.setAnnounce(msg)
+	ns.forwardToPeers(msg)
+}
+
+// called from any peer
+func (ns *NetService) GetAnnounce() spec.RawMessage {
+	ns.mutex.Lock() // vs setAnnounce
+	defer ns.mutex.Unlock()
+	return ns.encAnnounce
+}
+
+func (ns *NetService) setAnnounce(msg spec.RawMessage) {
+	ns.mutex.Lock() // vs getAnnounce
+	defer ns.mutex.Unlock()
+	ns.encAnnounce = msg
 }
 
 // on 'Run' goroutine
@@ -228,93 +238,6 @@ func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 	return spec.NodeInfo{}
 }
 
-// called from any peer
-func (ns *NetService) GetAnnounce() RawMessage {
-	ns.mutex.Lock() // vs setAnnounce
-	defer ns.mutex.Unlock()
-	return ns.encAnnounce
-}
-
-func (ns *NetService) setAnnounce(msg RawMessage) {
-	ns.mutex.Lock() // vs getAnnounce
-	defer ns.mutex.Unlock()
-	ns.encAnnounce = msg
-}
-
-// goroutine
-func (ns *NetService) updateAnnounce() {
-	msg, remain := ns.loadOrGenerateAnnounce()
-	ns.setAnnounce(msg)
-	timer := time.NewTimer(remain)
-	for !ns.Stopping() {
-		select {
-		case newMsg := <-ns.addrChange:
-			// whenever the node's address or channels change, gossip a new announcement.
-			ns.nextAnnounce = newMsg
-			log.Printf("[announce] received new address information")
-			msg, remain := ns.generateAnnounce(newMsg)
-			ns.setAnnounce(msg)
-			log.Printf("[announce] sending announcement to all peers")
-			ns.forwardToPeers(msg)
-			// restart the timer
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(remain)
-
-		case <-timer.C:
-			// every 24 hours, re-sign and gossip the announcement.
-			msg, remain := ns.generateAnnounce(ns.nextAnnounce)
-			ns.setAnnounce(msg)
-			log.Printf("[announce] sending announcement to all peers")
-			ns.forwardToPeers(msg)
-			// restart the timer
-			timer.Reset(remain)
-
-		case <-ns.Context.Done():
-			timer.Stop()
-			return
-		}
-	}
-}
-
-func (ns *NetService) loadOrGenerateAnnounce() (RawMessage, time.Duration) {
-	// load the stored announcement from the database
-	oldPayload, sig, expires, err := ns.cstore.GetAnnounce()
-	now := time.Now().Unix()
-	if err != nil {
-		log.Printf("[announce] cannot load announcement: %v", err)
-	} else if len(oldPayload) >= node.AddrMsgMinSize && len(sig) == 64 && now < expires {
-		// determine if the announcement we stored is the same as the announcement
-		// we would produce now; if so, avoid gossiping a new announcement
-		oldMsg := node.DecodeAddrMsg(oldPayload) // for Time
-		newMsg := ns.nextAnnounce                // copy
-		newMsg.Time = oldMsg.Time                // ignore Time for Equals()
-		if bytes.Equal(newMsg.Encode(), oldPayload) {
-			// re-encode the stored announcement
-			log.Printf("[announce] re-using stored announcement for %v seconds", expires-now)
-			hdr := dnet.ReEncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey.Pub, sig, oldPayload)
-			return RawMessage{Header: hdr, Payload: oldPayload}, time.Duration(expires-now) * time.Second
-		}
-	}
-	// create a new announcement and store it
-	return ns.generateAnnounce(ns.nextAnnounce)
-}
-
-func (ns *NetService) generateAnnounce(newMsg node.AddressMsg) (RawMessage, time.Duration) {
-	log.Printf("[announce] signing a new announcement")
-	now := time.Now()
-	newMsg.Time = dnet.UnixToDoge(now)
-	payload := newMsg.Encode()
-	msg := dnet.EncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey, payload)
-	view := dnet.MsgView(msg)
-	err := ns.cstore.SetAnnounce(payload, view.Signature(), now.Add(AnnounceLongevity).Unix())
-	if err != nil {
-		log.Printf("[announce] cannot store announcement: %v", err)
-	}
-	return RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity
-}
-
 // called from any
 func (ns *NetService) Stop() {
 	ns.mutex.Lock() // vs startListeners, acceptHandlers, any track/close
@@ -335,7 +258,7 @@ func (ns *NetService) Stop() {
 }
 
 // called from any
-func (ns *NetService) forwardToPeers(msg RawMessage) {
+func (ns *NetService) forwardToPeers(msg spec.RawMessage) {
 	ns.mutex.Lock() // vs countPeers,havePeer,trackPeer,adoptPeer,closePeer
 	defer ns.mutex.Unlock()
 	for _, peer := range ns.connectedPeers {
@@ -357,7 +280,7 @@ func (ns *NetService) forwardToHandlers(channel dnet.Tag4CC, rawHdr []byte, payl
 		if uint32(channel) == atomic.LoadUint32(&hand.channel) {
 			// non-blocking send to handler
 			select {
-			case hand.send <- RawMessage{Header: rawHdr, Payload: payload}:
+			case hand.send <- spec.RawMessage{Header: rawHdr, Payload: payload}:
 				// after accepting this message into the queue,
 				// the handler becomes responsible for sending a reject
 				// (however there can be multiple handlers!)

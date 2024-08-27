@@ -8,10 +8,6 @@ import (
 type ErrorCode string
 
 const (
-	// API errors:
-	BadRequest   ErrorCode = "bad-request"
-	NotAvailable ErrorCode = "not-available"
-	// Store (and API) errors:
 	NotFound      ErrorCode = "not-found"      // Store must return this when a record is not found
 	AlreadyExists ErrorCode = "already-exists" // Store must return this when a record already exists
 	DBConflict    ErrorCode = "db-conflict"    // Store must return this when a DB Txn Conflict occurs (caller must retry Txn)

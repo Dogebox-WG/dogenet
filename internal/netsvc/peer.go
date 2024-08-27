@@ -35,7 +35,7 @@ type peerConn struct {
 	allowLocal bool
 	isOutbound bool
 	receive    map[dnet.Tag4CC]chan dnet.Message
-	send       chan RawMessage // raw message
+	send       chan spec.RawMessage // raw message
 	mutex      sync.Mutex
 	addrTimer  *time.Ticker
 	pingTimer  *time.Ticker
@@ -53,7 +53,7 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, 
 		allowLocal: ns.allowLocal,
 		isOutbound: outbound,
 		receive:    make(map[dnet.Tag4CC]chan dnet.Message),
-		send:       make(chan RawMessage, 100),
+		send:       make(chan spec.RawMessage, 100),
 		addrTimer:  time.NewTicker(GossipAddressInverval),
 		pingTimer:  time.NewTicker(PingInverval),
 		addr:       addr,
@@ -244,7 +244,7 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	isnew, err := peer.store.AddNetNode(msg.PubKey, peerAddr, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
 	if isnew {
 		// re-broadcast the `Addr` message to all connected peers
-		peer.ns.forwardToPeers(RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
+		peer.ns.forwardToPeers(spec.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
 	}
 	return
 }
@@ -304,6 +304,8 @@ func (peer *peerConn) sendToPeer(who string) {
 
 // runs on receiveFromPeer
 func (peer *peerConn) sendMyAddress(conn net.Conn) error {
+	// XXX will need to block, unless NetService waits for
+	// an Announce before listening for peers.
 	msg := peer.ns.GetAnnounce()
 	_, err := conn.Write(msg.Header)
 	if err != nil {

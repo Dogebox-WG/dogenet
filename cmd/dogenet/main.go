@@ -15,6 +15,7 @@ import (
 
 	"code.dogecoin.org/governor"
 
+	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/core/collector"
 	"code.dogecoin.org/dogenet/internal/netsvc"
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -146,6 +147,9 @@ func main() {
 	// start the gossip server
 	netSvc := netsvc.New(binds, public, idenPub, db, nodeKey, allowLocal)
 	gov.Add("gossip", netSvc)
+
+	// start the announcement service
+	gov.Add("announce", announce.New(public, idenPub, db, nodeKey, netSvc))
 
 	// stay connected to local node if specified.
 	if core.IsValid() {
