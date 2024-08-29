@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS chan (
 ) WITHOUT ROWID;
 `
 
-// NewSQLiteStore returns a giga.PaymentsStore implementor that uses sqlite
+// NewSQLiteStore returns a spec.Store implementation that uses SQLite
 func NewSQLiteStore(fileName string, ctx context.Context) (spec.Store, error) {
 	backend := "sqlite3"
 	db, err := sql.Open(backend, fileName)

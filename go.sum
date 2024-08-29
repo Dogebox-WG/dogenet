@@ -1,6 +1,6 @@
 github.com/dogeorg/gossip v0.0.7 h1:QSEMG1chDROeWqhZaf86BXybRKr3jzd6S4MwJdp5OWU=
 github.com/dogeorg/gossip v0.0.7/go.mod h1:OXQ4kWDT3v+G0Qpry7TSnAIzS6/B4SxSKVSNjQ6E32Q=
-github.com/dogeorg/governor v1.0.1 h1:4I2bj6uSOaVaafZbAGBPAlazCVdQ+3noMGrc0lqsK34=
-github.com/dogeorg/governor v1.0.1/go.mod h1:sYCXRKKmwZvvzEFjjP2RRkUMbFMwVmXp3vEQf1vkzj4=
+github.com/dogeorg/governor v1.0.2 h1:bDjB89rBmrtyerRF8Mh3fP2RYs/p4esdFKkApQgWab8=
+github.com/dogeorg/governor v1.0.2/go.mod h1:sYCXRKKmwZvvzEFjjP2RRkUMbFMwVmXp3vEQf1vkzj4=
 github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
