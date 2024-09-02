@@ -323,17 +323,17 @@ func (s SQLiteStoreCtx) NodeList() (res spec.NodeListRes, err error) {
 	return
 }
 
-// TrimNodes expires both network and core nodes after 30 days.
+// TrimNodes expires records after N days.
 //
 // To take account of the possibility that this software has not
-// been run in the last 30 days (which would result in immediately
-// expiring all nodes in the database) we use a system where:
+// been run in the last N days (which would result in immediately
+// expiring all records) we use a system where:
 //
 // We keep a day counter that we increment once per day.
-// All nodes, when updated, store the current day counter + 30.
-// Nodes are expired once their stored day-count is < today.
+// All records, when updated, store the current day counter + N.
+// Records expire once their stored day-count is < today.
 //
-// This causes node-expiry to lag by the number of offline days.
+// This causes expiry to lag by the number of offline days.
 func (s SQLiteStoreCtx) TrimNodes() (advanced bool, remCore int64, remNode int64, err error) {
 	err = s.doTxn("TrimNodes", func(tx *sql.Tx) error {
 		// check if date has changed
@@ -449,7 +449,7 @@ func (s SQLiteStoreCtx) GetAnnounce() (payload []byte, sig []byte, time int64, e
 		e := row.Scan(&payload, &sig, &time)
 		if e != nil {
 			if !errors.Is(e, sql.ErrNoRows) {
-				err = fmt.Errorf("query: %v", e)
+				return fmt.Errorf("query: %v", e)
 			}
 		}
 		return nil
