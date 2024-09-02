@@ -107,7 +107,7 @@ func (ns *Announce) updateAnnounce() {
 	}
 }
 
-func (ns *Announce) loadOrGenerateAnnounce() (spec.RawMessage, time.Duration) {
+func (ns *Announce) loadOrGenerateAnnounce() (dnet.RawMessage, time.Duration) {
 	// load the stored announcement from the database
 	oldPayload, sig, expires, err := ns.cstore.GetAnnounce()
 	now := time.Now().Unix()
@@ -122,15 +122,15 @@ func (ns *Announce) loadOrGenerateAnnounce() (spec.RawMessage, time.Duration) {
 		if bytes.Equal(newMsg.Encode(), oldPayload) {
 			// re-encode the stored announcement
 			log.Printf("[announce] re-using stored announcement for %v seconds", expires-now)
-			hdr := dnet.ReEncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey.Pub, sig, oldPayload)
-			return spec.RawMessage{Header: hdr, Payload: oldPayload}, time.Duration(expires-now) * time.Second
+			msg := dnet.ReEncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey.Pub, sig, oldPayload)
+			return msg, time.Duration(expires-now) * time.Second
 		}
 	}
 	// create a new announcement and store it
 	return ns.generateAnnounce(ns.nextAnnounce)
 }
 
-func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (spec.RawMessage, time.Duration) {
+func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (dnet.RawMessage, time.Duration) {
 	log.Printf("[announce] signing a new announcement")
 	now := time.Now()
 	newMsg.Time = dnet.UnixToDoge(now)
@@ -141,5 +141,5 @@ func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (spec.RawMessage, t
 	if err != nil {
 		log.Printf("[announce] cannot store announcement: %v", err)
 	}
-	return spec.RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity
+	return dnet.RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity
 }

@@ -9,8 +9,3 @@ type NetSvc interface {
 	AnnounceReceiver
 	AddPeer(node NodeInfo)
 }
-
-type RawMessage struct {
-	Header  []byte // encoded header
-	Payload []byte // message payload
-}

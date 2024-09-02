@@ -26,14 +26,13 @@ type StoreCtx interface {
 	AddCoreNode(address Address, time int64, services uint64) error
 	UpdateCoreTime(address Address) error
 	ChooseCoreNode() (Address, error)
-	SampleCoreNodes() ([]Address, error)
 	// dogenet nodes
 	GetAnnounce() (payload []byte, sig []byte, time int64, err error)
 	SetAnnounce(payload []byte, sig []byte, time int64) error
 	AddNetNode(key PubKey, address Address, time int64, owner PubKey, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error)
 	UpdateNetTime(key PubKey) error
 	ChooseNetNode() (NodeInfo, error)
-	SampleNetNodes() ([]NodeInfo, error)
+	ChooseNetNodeMsg() (NodeRecord, error)
 	SampleNodesByChannel(channels []dnet.Tag4CC, exclude []PubKey) ([]NodeInfo, error)
 	SampleNodesByIP(ipaddr net.IP, exclude []PubKey) ([]NodeInfo, error)
 }

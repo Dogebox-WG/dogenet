@@ -8,7 +8,6 @@ import (
 	"net"
 	"sync/atomic"
 
-	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/gossip/dnet"
 )
 
@@ -17,7 +16,7 @@ type handlerConn struct {
 	conn    net.Conn
 	channel uint32 // for atomic.Load
 	receive map[dnet.Tag4CC]chan dnet.Message
-	send    chan spec.RawMessage
+	send    chan dnet.RawMessage
 	name    string
 }
 
@@ -26,7 +25,7 @@ func newHandler(conn net.Conn, ns *NetService) *handlerConn {
 		ns:      ns,
 		conn:    conn,
 		receive: make(map[dnet.Tag4CC]chan dnet.Message),
-		send:    make(chan spec.RawMessage),
+		send:    make(chan dnet.RawMessage),
 		name:    "protocol-handler",
 	}
 	return hand
@@ -60,7 +59,7 @@ func (hand *handlerConn) receiveFromHandler() {
 		}
 		// forward the message to all peers (ignore channel here)
 		log.Printf("[%s] received from handler: %v %v", hand.name, msg.Chan, msg.Tag)
-		hand.ns.forwardToPeers(spec.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
+		hand.ns.forwardToPeers(dnet.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
 	}
 }
 

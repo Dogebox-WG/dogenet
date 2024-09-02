@@ -3,7 +3,7 @@ package spec
 import "code.dogecoin.org/gossip/dnet"
 
 type AnnounceReceiver interface {
-	ReceiveAnnounce(announce RawMessage)
+	ReceiveAnnounce(announce dnet.RawMessage)
 }
 
 type ChangePublicAddress struct {

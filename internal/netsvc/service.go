@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"code.dogecoin.org/gossip/dnet"
+	"code.dogecoin.org/gossip/node"
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -17,7 +18,8 @@ import (
 
 const IdealPeers = 8
 const ProtocolSocket = "/tmp/dogenet.sock"
-const PeerLockTime = 300 * time.Second // 5 minutes
+const PeerLockTime = 300 * time.Second         // 5 minutes
+const GossipAddressInverval = 89 * time.Second // gossip a random address to the peer
 
 type NetService struct {
 	governor.ServiceCtx
@@ -36,7 +38,7 @@ type NetService struct {
 	lockedPeers    map[MapPubKey]time.Time // peer pubkeys locked for a short time during connection attempts
 	socket         net.Listener            // listen socket for handlers to connect
 	handlers       []*handlerConn          // currently connected handlers
-	encAnnounce    spec.RawMessage         // current encoded announcement, ready for sending to peers (mutex)
+	encAnnounce    dnet.RawMessage         // current encoded announcement, ready for sending to peers (mutex)
 }
 
 type MapPubKey = [32]byte
@@ -62,6 +64,7 @@ func (ns *NetService) Run() {
 	ns.startListeners(&wg)
 	go ns.acceptHandlers()
 	go ns.findPeers()
+	go ns.gossipRandomAddresses()
 	wg.Wait()
 }
 
@@ -74,19 +77,19 @@ func (ns *NetService) AddPeer(node spec.NodeInfo) {
 
 // ReceiveAnnounce implements AnnounceReceiver.
 // Receives signed announcement messages from the Announce service.
-func (ns *NetService) ReceiveAnnounce(msg spec.RawMessage) {
+func (ns *NetService) ReceiveAnnounce(msg dnet.RawMessage) {
 	ns.setAnnounce(msg)
 	ns.forwardToPeers(msg)
 }
 
 // called from any peer
-func (ns *NetService) GetAnnounce() spec.RawMessage {
+func (ns *NetService) GetAnnounce() dnet.RawMessage {
 	ns.mutex.Lock() // vs setAnnounce
 	defer ns.mutex.Unlock()
 	return ns.encAnnounce
 }
 
-func (ns *NetService) setAnnounce(msg spec.RawMessage) {
+func (ns *NetService) setAnnounce(msg dnet.RawMessage) {
 	ns.mutex.Lock() // vs getAnnounce
 	defer ns.mutex.Unlock()
 	ns.encAnnounce = msg
@@ -171,6 +174,29 @@ func (ns *NetService) acceptHandlers() {
 }
 
 // goroutine
+func (ns *NetService) gossipRandomAddresses() {
+	for !ns.Stopping() {
+		// wait for next turn
+		time.Sleep(GossipAddressInverval)
+
+		// choose a random node address
+		nm, err := ns.cstore.ChooseNetNodeMsg()
+		if err != nil {
+			if spec.IsNotFoundError(err) {
+				log.Printf("[Iden]: no addresses to gossip")
+			} else {
+				log.Printf("[Iden]: %v", err)
+			}
+			continue
+		}
+
+		// send the message to peers
+		msg := dnet.ReEncodeMessage(dnet.ChannelIdentity, node.TagAddress, nm.PubKey, nm.Sig, nm.Payload)
+		ns.forwardToPeers(msg)
+	}
+}
+
+// goroutine
 func (ns *NetService) findPeers() {
 	who := "find-peers"
 	for !ns.Stopping() {
@@ -246,7 +272,7 @@ func (ns *NetService) Stop() {
 }
 
 // called from any
-func (ns *NetService) forwardToPeers(msg spec.RawMessage) {
+func (ns *NetService) forwardToPeers(msg dnet.RawMessage) {
 	ns.mutex.Lock() // vs countPeers,havePeer,trackPeer,adoptPeer,closePeer
 	defer ns.mutex.Unlock()
 	for _, peer := range ns.connectedPeers {
@@ -268,7 +294,7 @@ func (ns *NetService) forwardToHandlers(channel dnet.Tag4CC, rawHdr []byte, payl
 		if uint32(channel) == atomic.LoadUint32(&hand.channel) {
 			// non-blocking send to handler
 			select {
-			case hand.send <- spec.RawMessage{Header: rawHdr, Payload: payload}:
+			case hand.send <- dnet.RawMessage{Header: rawHdr, Payload: payload}:
 				// after accepting this message into the queue,
 				// the handler becomes responsible for sending a reject
 				// (however there can be multiple handlers!)

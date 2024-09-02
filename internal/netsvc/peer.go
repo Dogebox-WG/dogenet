@@ -18,7 +18,6 @@ import (
 
 const OldestTime = -((30 * 24) + 1) * time.Hour // 30 days + 1 hour into the past
 const NewestTime = 1 * time.Hour                // 1 hour into the future
-const GossipAddressInverval = 89 * time.Second  // gossip a random address to the peer
 const PingInverval = 60 * time.Second           // send a Ping periodically
 
 var TagPing = dnet.NewTag("Ping")
@@ -35,10 +34,9 @@ type peerConn struct {
 	allowLocal bool
 	isOutbound bool
 	receive    map[dnet.Tag4CC]chan dnet.Message
-	send       chan spec.RawMessage // raw message
+	send       chan dnet.RawMessage // raw message
 	mutex      sync.Mutex
-	addrTimer  *time.Ticker
-	pingTimer  *time.Ticker
+	pingTimer  *time.Ticker // Timer for sending pings to check if the peer is alive
 	addr       spec.Address // Peer's public address
 	peerPub    [32]byte     // Peer's pubkey (pre-set for outbound;  inbound connections
 	nodeKey    dnet.KeyPair // [const] to sign `Addr` messages (key for THIS node)
@@ -53,8 +51,7 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, 
 		allowLocal: ns.allowLocal, // allow local IP address in Announcement messages (for local testing)
 		isOutbound: outbound,
 		receive:    make(map[dnet.Tag4CC]chan dnet.Message),
-		send:       make(chan spec.RawMessage, 100),
-		addrTimer:  time.NewTicker(GossipAddressInverval),
+		send:       make(chan dnet.RawMessage, 100),
 		pingTimer:  time.NewTicker(PingInverval),
 		addr:       addr,
 		peerPub:    peerPub,
@@ -245,7 +242,7 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	isnew, err := peer.store.AddNetNode(msg.PubKey, peerAddr, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
 	if isnew {
 		// re-broadcast the `Addr` message to all connected peers
-		peer.ns.forwardToPeers(spec.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
+		peer.ns.forwardToPeers(dnet.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
 	}
 	return
 }
@@ -277,13 +274,6 @@ func (peer *peerConn) sendToPeer(who string) {
 				peer.ns.closePeer(peer)
 				return
 			}
-		case <-peer.addrTimer.C:
-			log.Printf("[%s] <- gossip a random address (TODO)", who)
-			// if err != nil {
-			// 	log.Printf("[%s] failed to gossip [Node][Addr] to peer: %v", who, err)
-			// 	peer.ns.closePeer(peer)
-			// 	return
-			// }
 		case <-peer.pingTimer.C:
 			// XXX should encode this once and re-use.
 			msg := dnet.EncodeMessage(node.ChannelNode, TagPing, peer.nodeKey, []byte{})
@@ -297,7 +287,6 @@ func (peer *peerConn) sendToPeer(who string) {
 			// shutting down
 			// no race: peer.peerPub is final before sendToPeer starts (closePeer OK to read peer.peerPub)
 			peer.ns.closePeer(peer)
-			peer.addrTimer.Stop()
 			peer.pingTimer.Stop()
 			return
 		}

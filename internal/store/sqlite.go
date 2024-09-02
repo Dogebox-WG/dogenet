@@ -100,12 +100,21 @@ func NewSQLiteStore(fileName string, ctx context.Context) (spec.Store, error) {
 		return store, dbErr(err, "creating database schema")
 	}
 	// init config table
-	sctx := SQLiteStoreCtx{_db: store.db, ctx: ctx}
-	err = sctx.doTxn("init config", func(tx *sql.Tx) error {
+	err = store.initConfig(ctx)
+	return store, err
+}
+
+func (s *SQLiteStore) Close() {
+	s.db.Close()
+}
+
+func (s *SQLiteStore) initConfig(ctx context.Context) error {
+	sctx := SQLiteStoreCtx{_db: s.db, ctx: ctx}
+	return sctx.doTxn("init config", func(tx *sql.Tx) error {
 		config := tx.QueryRow("SELECT dayc,last FROM config LIMIT 1")
 		var dayc int64
 		var last int64
-		err = config.Scan(&dayc, &last)
+		err := config.Scan(&dayc, &last)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				_, err = tx.Exec("INSERT INTO config (dayc,last) VALUES (1,?)", unixDayStamp())
@@ -114,11 +123,6 @@ func NewSQLiteStore(fileName string, ctx context.Context) (spec.Store, error) {
 		}
 		return nil
 	})
-	return store, err
-}
-
-func (s *SQLiteStore) Close() {
-	s.db.Close()
 }
 
 func (s *SQLiteStore) WithCtx(ctx context.Context) spec.StoreCtx {
@@ -196,16 +200,16 @@ func dbErr(err error, where string) error {
 		if sqErr.Code == sqlite3.ErrConstraint {
 			// MUST detect 'AlreadyExists' to fulfil the API contract!
 			// Constraint violation, e.g. a duplicate key.
-			return WrapErr(AlreadyExists, "SQLiteStore: already-exists", err)
+			return spec.WrapErr(spec.AlreadyExists, "SQLiteStore: already-exists", err)
 		}
 		if sqErr.Code == sqlite3.ErrBusy || sqErr.Code == sqlite3.ErrLocked {
 			// SQLite has a single-writer policy, even in WAL (write-ahead) mode.
 			// SQLite will return BUSY if the database is locked by another connection.
 			// We treat this as a transient database conflict, and the caller should retry.
-			return WrapErr(DBConflict, "SQLiteStore: db-conflict", err)
+			return spec.WrapErr(spec.DBConflict, "SQLiteStore: db-conflict", err)
 		}
 	}
-	return WrapErr(DBProblem, fmt.Sprintf("SQLiteStore: db-problem: %s", where), err)
+	return spec.WrapErr(spec.DBProblem, fmt.Sprintf("SQLiteStore: db-problem: %s", where), err)
 }
 
 // STORE INTERFACE
@@ -436,13 +440,6 @@ func (s SQLiteStoreCtx) ChooseCoreNode() (res Address, err error) {
 	return
 }
 
-func (s SQLiteStoreCtx) SampleCoreNodes() (res []Address, err error) {
-	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
-		return nil
-	})
-	return
-}
-
 func (s SQLiteStoreCtx) GetAnnounce() (payload []byte, sig []byte, time int64, err error) {
 	err = s.doTxn("GetAnnounce", func(tx *sql.Tx) error {
 		row := tx.QueryRow("SELECT payload, sig, time FROM announce LIMIT 1")
@@ -530,7 +527,7 @@ func (s SQLiteStoreCtx) AddNetNode(key spec.PubKey, address Address, time int64,
 }
 
 func (s SQLiteStoreCtx) UpdateNetTime(key spec.PubKey) (err error) {
-	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
+	err = s.doTxn("UpdateNetTime", func(tx *sql.Tx) error {
 		_, e := tx.Exec("UPDATE node SET dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE key=?", key)
 		if e != nil {
 			return fmt.Errorf("update: %v", e)
@@ -541,8 +538,8 @@ func (s SQLiteStoreCtx) UpdateNetTime(key spec.PubKey) (err error) {
 }
 
 func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
-	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
-		row := tx.QueryRow("SELECT key,address FROM node ORDER BY RANDOM() LIMIT 1")
+	err = s.doTxn("ChooseNetNode", func(tx *sql.Tx) error {
+		row := tx.QueryRow("SELECT key,address FROM node WHERE oid IN (SELECT oid FROM node ORDER BY RANDOM() LIMIT 1)")
 		var key []byte
 		var addr []byte
 		err := row.Scan(&key, &addr)
@@ -556,7 +553,7 @@ func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 		if len(key) != 32 {
 			return fmt.Errorf("invalid node key: %v (should be 32 bytes)", hex.EncodeToString(key))
 		}
-		res.PubKey = ([32]byte)(key)
+		res.PubKey = ([32]byte)(key) // Go 1.17
 		res.Addr, err = dnet.AddressFromBytes(addr)
 		if err != nil {
 			return fmt.Errorf("invalid address: %v", err)
@@ -566,22 +563,31 @@ func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 	return
 }
 
-func (s SQLiteStoreCtx) SampleNetNodes() (res []spec.NodeInfo, err error) {
-	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
+func (s SQLiteStoreCtx) ChooseNetNodeMsg() (r spec.NodeRecord, err error) {
+	err = s.doTxn("ChooseNetNodeMsg", func(tx *sql.Tx) error {
+		row := tx.QueryRow("SELECT key,payload,sig FROM node WHERE oid IN (SELECT oid FROM node ORDER BY RANDOM() LIMIT 1)")
+		err := row.Scan(&r.PubKey, &r.Payload, &r.Sig)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			} else {
+				return fmt.Errorf("query: %v", err)
+			}
+		}
 		return nil
 	})
 	return
 }
 
 func (s SQLiteStoreCtx) SampleNodesByChannel(channels []dnet.Tag4CC, exclude []spec.PubKey) (res []spec.NodeInfo, err error) {
-	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
+	err = s.doTxn("SampleNodesByChannel", func(tx *sql.Tx) error {
 		return nil
 	})
 	return
 }
 
 func (s SQLiteStoreCtx) SampleNodesByIP(ipaddr net.IP, exclude []spec.PubKey) (res []spec.NodeInfo, err error) {
-	err = s.doTxn("SampleCoreNodes", func(tx *sql.Tx) error {
+	err = s.doTxn("SampleNodesByIP", func(tx *sql.Tx) error {
 		return nil
 	})
 	return
