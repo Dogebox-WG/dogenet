@@ -219,6 +219,7 @@ func (s SQLiteStoreCtx) CoreStats() (mapSize int, newNodes int, err error) {
 		row := tx.QueryRow("WITH t AS (SELECT COUNT(address) AS num, 1 AS rn FROM core), u AS (SELECT COUNT(address) AS isnew, 1 AS rn FROM core WHERE isnew=TRUE) SELECT t.num, u.isnew FROM t INNER JOIN u ON t.rn=u.rn")
 		err := row.Scan(&mapSize, &newNodes)
 		if err != nil {
+			// special case: always return nil (no stats) errors.
 			if err != sql.ErrNoRows {
 				log.Printf("[Store] CoreStats: %v", err)
 			}
@@ -234,6 +235,7 @@ func (s SQLiteStoreCtx) NetStats() (mapSize int, err error) {
 		row := tx.QueryRow("SELECT COUNT(key) AS num FROM node")
 		err := row.Scan(&mapSize)
 		if err != nil {
+			// special case: always return nil (no stats) errors.
 			if err != sql.ErrNoRows {
 				log.Printf("[Store] NetStats: %v", err)
 			}
@@ -474,7 +476,7 @@ func (s SQLiteStoreCtx) SetAnnounce(payload []byte, sig []byte, time int64) erro
 // const add_netnode_psql = "INSERT INTO node (key, address, time, owner, payload, sig, dayc) VALUES (?1,?2,?3,?4,?5,?6,30+(SELECT dayc FROM config LIMIT 1)) ON CONFLICT ON CONSTRAINT node_key DO UPDATE SET address=?2, time=?3, owner=?4, payload=?5, sig=?6, dayc=30+(SELECT dayc FROM config LIMIT 1)"
 // const add_netnode_sqlite = "INSERT INTO node (key, address, time, owner, payload, sig, dayc) VALUES (?1,?2,?3,?4,?5,?6,30+(SELECT dayc FROM config LIMIT 1)) ON CONFLICT REPLACE RETURNING oid"
 
-func (s SQLiteStoreCtx) AddNetNode(key spec.PubKey, address Address, time int64, owner spec.PubKey, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error) {
+func (s SQLiteStoreCtx) AddNetNode(key []byte, address Address, time int64, owner []byte, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error) {
 	err = s.doTxn("AddNetNode", func(tx *sql.Tx) error {
 		row := tx.QueryRow("SELECT oid,payload FROM node WHERE key=? LIMIT 1", key)
 		var oid int64
@@ -526,7 +528,7 @@ func (s SQLiteStoreCtx) AddNetNode(key spec.PubKey, address Address, time int64,
 	return
 }
 
-func (s SQLiteStoreCtx) UpdateNetTime(key spec.PubKey) (err error) {
+func (s SQLiteStoreCtx) UpdateNetTime(key []byte) (err error) {
 	err = s.doTxn("UpdateNetTime", func(tx *sql.Tx) error {
 		_, e := tx.Exec("UPDATE node SET dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE key=?", key)
 		if e != nil {
@@ -545,7 +547,7 @@ func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 		err := row.Scan(&key, &addr)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil
+				return spec.NotFoundError
 			} else {
 				return fmt.Errorf("query: %v", err)
 			}
@@ -553,7 +555,7 @@ func (s SQLiteStoreCtx) ChooseNetNode() (res spec.NodeInfo, err error) {
 		if len(key) != 32 {
 			return fmt.Errorf("invalid node key: %v (should be 32 bytes)", hex.EncodeToString(key))
 		}
-		res.PubKey = ([32]byte)(key) // Go 1.17
+		res.PubKey = *(*[32]byte)(key) // Go 1.17
 		res.Addr, err = dnet.AddressFromBytes(addr)
 		if err != nil {
 			return fmt.Errorf("invalid address: %v", err)
@@ -569,7 +571,7 @@ func (s SQLiteStoreCtx) ChooseNetNodeMsg() (r spec.NodeRecord, err error) {
 		err := row.Scan(&r.PubKey, &r.Payload, &r.Sig)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil
+				return spec.NotFoundError
 			} else {
 				return fmt.Errorf("query: %v", err)
 			}
@@ -579,14 +581,14 @@ func (s SQLiteStoreCtx) ChooseNetNodeMsg() (r spec.NodeRecord, err error) {
 	return
 }
 
-func (s SQLiteStoreCtx) SampleNodesByChannel(channels []dnet.Tag4CC, exclude []spec.PubKey) (res []spec.NodeInfo, err error) {
+func (s SQLiteStoreCtx) SampleNodesByChannel(channels []dnet.Tag4CC, exclude [][]byte) (res []spec.NodeInfo, err error) {
 	err = s.doTxn("SampleNodesByChannel", func(tx *sql.Tx) error {
 		return nil
 	})
 	return
 }
 
-func (s SQLiteStoreCtx) SampleNodesByIP(ipaddr net.IP, exclude []spec.PubKey) (res []spec.NodeInfo, err error) {
+func (s SQLiteStoreCtx) SampleNodesByIP(ipaddr net.IP, exclude [][]byte) (res []spec.NodeInfo, err error) {
 	err = s.doTxn("SampleNodesByIP", func(tx *sql.Tx) error {
 		return nil
 	})

@@ -15,7 +15,7 @@ import (
 
 // const AnnounceLongevity = 24 * time.Hour
 const AnnounceLongevity = 5 * time.Minute
-const QueueAnnouncement = 1 * time.Minute
+const QueueAnnouncement = 10 * time.Second
 
 type Announce struct {
 	governor.ServiceCtx
@@ -27,17 +27,17 @@ type Announce struct {
 	nextAnnounce node.AddressMsg       // current: public address, owner pubkey, channels, services
 }
 
-func New(public spec.Address, idenPub dnet.PubKey, store spec.Store, nodeKey dnet.KeyPair, receiver spec.AnnounceReceiver) *Announce {
+func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver spec.AnnounceReceiver, changes chan any) *Announce {
 	return &Announce{
 		store:    store,
 		nodeKey:  nodeKey,
-		changes:  make(chan any, 10),
+		changes:  changes,
 		receiver: receiver,
 		nextAnnounce: node.AddressMsg{
-			// Time: is dynamically updated
+			// Time is dynamically updated
+			// Owner comes from ChangeOwnerKey message or saved announcement
 			Address: public.Host.To16(),
 			Port:    public.Port,
-			Owner:   idenPub,
 			// Channels: are dynamically updated
 			Services: []node.Service{
 				// XXX this needs to be a config option (public Core Node address)
@@ -50,13 +50,10 @@ func New(public spec.Address, idenPub dnet.PubKey, store spec.Store, nodeKey dne
 // goroutine
 func (ns *Announce) Run() {
 	ns.cstore = ns.store.WithCtx(ns.Context) // Service Context is first available here
-	ns.updateAnnounce()
-}
-
-// goroutine
-func (ns *Announce) updateAnnounce() {
-	msg, remain := ns.loadOrGenerateAnnounce()
-	ns.receiver.ReceiveAnnounce(msg)
+	msg, remain, ok := ns.loadOrGenerateAnnounce()
+	if ok {
+		ns.receiver.ReceiveAnnounce(msg)
+	}
 	timer := time.NewTimer(remain)
 	for !ns.Stopping() {
 		select {
@@ -68,8 +65,8 @@ func (ns *Announce) updateAnnounce() {
 				ns.nextAnnounce.Port = msg.Addr.Port
 				log.Printf("[announce] received new public address: %v", msg.Addr)
 			case spec.ChangeOwnerKey:
-				ns.nextAnnounce.Owner = msg.Key
-				log.Printf("[announce] received new owner key: %v", hex.EncodeToString(msg.Key))
+				ns.nextAnnounce.Owner = msg.Key[:]
+				log.Printf("[announce] received new owner key: %v", hex.EncodeToString(msg.Key[:]))
 			case spec.ChangeChannel:
 				if msg.Remove {
 					ns.nextAnnounce.Channels = slices.DeleteFunc(ns.nextAnnounce.Channels, func(e dnet.Tag4CC) bool {
@@ -87,16 +84,20 @@ func (ns *Announce) updateAnnounce() {
 				continue
 			}
 			// whenever a change is received, reset timer to 60 seconds.
-			if !timer.Stop() {
-				<-timer.C
+			if ns.nextAnnounce.IsValid() {
+				if !timer.Stop() {
+					<-timer.C
+				}
+				timer.Reset(QueueAnnouncement)
 			}
-			timer.Reset(QueueAnnouncement)
 
 		case <-timer.C:
 			// every 24 hours, re-sign and gossip the announcement.
-			msg, remain := ns.generateAnnounce(ns.nextAnnounce)
-			ns.receiver.ReceiveAnnounce(msg)
-			log.Printf("[announce] sending announcement to all peers")
+			msg, remain, ok := ns.generateAnnounce(ns.nextAnnounce)
+			if ok {
+				ns.receiver.ReceiveAnnounce(msg)
+				log.Printf("[announce] sending announcement to all peers")
+			}
 			// restart the timer
 			timer.Reset(remain)
 
@@ -107,7 +108,7 @@ func (ns *Announce) updateAnnounce() {
 	}
 }
 
-func (ns *Announce) loadOrGenerateAnnounce() (dnet.RawMessage, time.Duration) {
+func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Duration, ok bool) {
 	// load the stored announcement from the database
 	oldPayload, sig, expires, err := ns.cstore.GetAnnounce()
 	now := time.Now().Unix()
@@ -115,7 +116,7 @@ func (ns *Announce) loadOrGenerateAnnounce() (dnet.RawMessage, time.Duration) {
 		log.Printf("[announce] cannot load announcement: %v", err)
 	} else if len(oldPayload) >= node.AddrMsgMinSize && len(sig) == 64 && now < expires {
 		// determine if the announcement we stored is the same as the announcement
-		// we would produce now; if so, avoid gossiping a new announcement
+		// we would produce now; if so, avoid signing and gossiping a new announcement
 		oldMsg := node.DecodeAddrMsg(oldPayload) // for Time
 		newMsg := ns.nextAnnounce                // copy
 		newMsg.Time = oldMsg.Time                // ignore Time for Equals()
@@ -123,23 +124,26 @@ func (ns *Announce) loadOrGenerateAnnounce() (dnet.RawMessage, time.Duration) {
 			// re-encode the stored announcement
 			log.Printf("[announce] re-using stored announcement for %v seconds", expires-now)
 			msg := dnet.ReEncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey.Pub, sig, oldPayload)
-			return msg, time.Duration(expires-now) * time.Second
+			return msg, time.Duration(expires-now) * time.Second, true
 		}
 	}
 	// create a new announcement and store it
 	return ns.generateAnnounce(ns.nextAnnounce)
 }
 
-func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (dnet.RawMessage, time.Duration) {
+func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (raw dnet.RawMessage, rem time.Duration, ok bool) {
+	if !ns.nextAnnounce.IsValid() {
+		return dnet.RawMessage{}, AnnounceLongevity, false
+	}
 	log.Printf("[announce] signing a new announcement")
 	now := time.Now()
 	newMsg.Time = dnet.UnixToDoge(now)
 	payload := newMsg.Encode()
 	msg := dnet.EncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey, payload)
 	view := dnet.MsgView(msg)
-	err := ns.cstore.SetAnnounce(payload, view.Signature(), now.Add(AnnounceLongevity).Unix())
+	err := ns.cstore.SetAnnounce(payload, view.Signature()[:], now.Add(AnnounceLongevity).Unix())
 	if err != nil {
 		log.Printf("[announce] cannot store announcement: %v", err)
 	}
-	return dnet.RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity
+	return dnet.RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity, true
 }

@@ -3,6 +3,7 @@ package netsvc
 import (
 	"encoding/hex"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"sync"
@@ -18,18 +19,19 @@ import (
 
 const IdealPeers = 8
 const ProtocolSocket = "/tmp/dogenet.sock"
-const PeerLockTime = 300 * time.Second         // 5 minutes
-const GossipAddressInverval = 89 * time.Second // gossip a random address to the peer
+const PeerLockTime = 30 * time.Second          // was 5 minutes, now 30 seconds
+const GossipAddressInverval = 25 * time.Second // gossip a random address to the peer
+const GossipAddressRandom = 10                 // randomness in the interval, in seconds
 
 type NetService struct {
 	governor.ServiceCtx
-	bindAddrs  []spec.Address // bind-to address on THIS node
-	publicAddr spec.Address   // public address of THIS node
-	allowLocal bool           // allow local IP address in Announcement messages (for local testing)
-	store      spec.Store
-	cstore     spec.StoreCtx
-	nodeKey    dnet.KeyPair
-	newPeers   chan spec.NodeInfo
+	bindAddrs       []spec.Address // bind-to address on THIS node
+	allowLocal      bool           // allow local IP address in Announcement messages (for local testing)
+	store           spec.Store
+	cstore          spec.StoreCtx
+	nodeKey         dnet.KeyPair
+	newPeers        chan spec.NodeInfo
+	announceChanges chan any // send spec.Change* to Announce service
 	// MUTEX state:
 	mutex          sync.Mutex
 	connections    []net.Conn              // all current network connections (peers and handlers)
@@ -45,15 +47,16 @@ type MapPubKey = [32]byte
 
 var NoPubKey [32]byte // zeroes
 
-func New(bind []spec.Address, public spec.Address, idenPub dnet.PubKey, store spec.Store, nodeKey dnet.KeyPair, allowLocal bool) spec.NetSvc {
+func New(bind []spec.Address, nodeKey dnet.KeyPair, store spec.Store, allowLocal bool, announceChanges chan any) spec.NetSvc {
 	return &NetService{
-		bindAddrs:      bind,
-		allowLocal:     allowLocal,
-		store:          store,
-		nodeKey:        nodeKey,
-		lockedPeers:    make(map[MapPubKey]time.Time),
-		connectedPeers: make(map[MapPubKey]*peerConn),
-		newPeers:       make(chan spec.NodeInfo, 10),
+		bindAddrs:       bind,
+		allowLocal:      allowLocal,
+		store:           store,
+		nodeKey:         nodeKey,
+		lockedPeers:     make(map[MapPubKey]time.Time),
+		connectedPeers:  make(map[MapPubKey]*peerConn),
+		newPeers:        make(chan spec.NodeInfo, 10),
+		announceChanges: announceChanges, // used in handler
 	}
 }
 
@@ -177,21 +180,22 @@ func (ns *NetService) acceptHandlers() {
 func (ns *NetService) gossipRandomAddresses() {
 	for !ns.Stopping() {
 		// wait for next turn
-		time.Sleep(GossipAddressInverval)
+		time.Sleep(GossipAddressInverval + time.Duration(rand.Intn(GossipAddressRandom))*time.Second)
 
 		// choose a random node address
 		nm, err := ns.cstore.ChooseNetNodeMsg()
 		if err != nil {
 			if spec.IsNotFoundError(err) {
-				log.Printf("[Iden]: no addresses to gossip")
+				log.Printf("[Node]: no addresses to gossip")
 			} else {
-				log.Printf("[Iden]: %v", err)
+				log.Printf("[Node]: %v", err)
 			}
 			continue
 		}
 
-		// send the message to peers
-		msg := dnet.ReEncodeMessage(dnet.ChannelIdentity, node.TagAddress, nm.PubKey, nm.Sig, nm.Payload)
+		// send the [Node][Addr] message to peers
+		log.Printf("[Node]: gossiping a random peer address")
+		msg := dnet.ReEncodeMessage(dnet.ChannelNode, node.TagAddress, (*[32]byte)(nm.PubKey), nm.Sig, nm.Payload)
 		ns.forwardToPeers(msg)
 	}
 }

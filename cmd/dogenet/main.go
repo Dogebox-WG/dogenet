@@ -102,7 +102,19 @@ func main() {
 			if err != nil {
 				panic(fmt.Sprintf("cannot generate node keypair: %v", err))
 			}
-			fmt.Printf("%v", hex.EncodeToString(nodeKey.Priv))
+			priv := hex.EncodeToString(nodeKey.Priv[:])
+			pub := hex.EncodeToString(nodeKey.Pub[:])
+			if flag.NArg() > 1 {
+				to_priv := flag.Arg(1)
+				os.WriteFile(to_priv, []byte(priv), 0666)
+				if flag.NArg() > 2 {
+					to_pub := flag.Arg(2)
+					os.WriteFile(to_pub, []byte(pub), 0666)
+				}
+			} else {
+				fmt.Printf("priv: %v\n", priv)
+				fmt.Printf("pub: %v\n", pub)
+			}
 			os.Exit(0)
 		default:
 			log.Printf("Unexpected argument: %v", cmd)
@@ -131,9 +143,8 @@ func main() {
 	}
 
 	// get the private key from the KEY env-var
-	nodeKey, idenPub := keysFromEnv()
-	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub))
-	log.Printf("Iden PubKey is: %v", hex.EncodeToString(idenPub))
+	nodeKey := keysFromEnv()
+	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub[:]))
 
 	// load the previously saved state.
 	db, err := store.NewSQLiteStore(dbfile, context.Background())
@@ -145,11 +156,12 @@ func main() {
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
 	// start the gossip server
-	netSvc := netsvc.New(binds, public, idenPub, db, nodeKey, allowLocal)
+	changes := make(chan any, 10)
+	netSvc := netsvc.New(binds, nodeKey, db, allowLocal, changes)
 	gov.Add("gossip", netSvc)
 
 	// start the announcement service
-	gov.Add("announce", announce.New(public, idenPub, db, nodeKey, netSvc))
+	gov.Add("announce", announce.New(public, nodeKey, db, netSvc, changes))
 
 	// stay connected to local node if specified.
 	if core.IsValid() {
@@ -198,12 +210,12 @@ func parseIPPort(arg string, name string, defaultPort uint16) (dnet.Address, err
 	return res, nil
 }
 
-func keysFromEnv() (dnet.KeyPair, spec.PubKey) {
+func keysFromEnv() dnet.KeyPair {
 	// get the private key from the KEY env-var
 	nodeHex := os.Getenv("KEY")
 	os.Setenv("KEY", "") // don't leave the key in the environment
 	if nodeHex == "" {
-		log.Printf("Missing KEY env-var: node public-private keypair (64 bytes; see `dogenet genkey`)")
+		log.Printf("Missing KEY env-var: node public-private keypair (32 bytes; see `dogenet genkey`)")
 		os.Exit(3)
 	}
 	nodeKey, err := hex.DecodeString(nodeHex)
@@ -211,24 +223,9 @@ func keysFromEnv() (dnet.KeyPair, spec.PubKey) {
 		log.Printf("Invalid KEY hex in env-var: %v", err)
 		os.Exit(3)
 	}
-	if len(nodeKey) != 64 {
-		log.Printf("Invalid KEY hex in env-var: must be 64 bytes")
+	if len(nodeKey) != 32 {
+		log.Printf("Invalid KEY hex in env-var: must be 32 bytes")
 		os.Exit(3)
 	}
-	// get the identity pubkey from IDENT env-var
-	idenHex := os.Getenv("IDENT")
-	if idenHex == "" {
-		log.Printf("Missing IDENT env-var: owner identity public key (32 bytes)")
-		os.Exit(3)
-	}
-	idenPub, err := hex.DecodeString(idenHex)
-	if err != nil {
-		log.Printf("Invalid IDENT hex in env-var: %v", err)
-		os.Exit(3)
-	}
-	if len(idenPub) != 32 {
-		log.Printf("Invalid IDENT hex in env-var: must be 32 bytes")
-		os.Exit(3)
-	}
-	return dnet.KeyPairFromPrivKey(nodeKey), idenPub
+	return dnet.KeyPairFromPrivKey((*[32]byte)(nodeKey))
 }

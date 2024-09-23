@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +17,8 @@ import (
 	"code.dogecoin.org/dogenet/internal/spec"
 )
 
-const OldestTime = -((30 * 24) + 1) * time.Hour // 30 days + 1 hour into the past
-const NewestTime = 1 * time.Hour                // 1 hour into the future
-const PingInverval = 60 * time.Second           // send a Ping periodically
-
-var TagPing = dnet.NewTag("Ping")
-var TagPong = dnet.NewTag("Pong")
+const OldestAddrTime = -(30 * 24) * time.Hour // 30 days in the past
+const NewestAddrTime = 5 * time.Minute        // 5 minutes into the future
 
 // Peer connections exchange messages with a remote peer;
 // forward received messages to channel owners,
@@ -36,11 +33,9 @@ type peerConn struct {
 	receive    map[dnet.Tag4CC]chan dnet.Message
 	send       chan dnet.RawMessage // raw message
 	mutex      sync.Mutex
-	pingTimer  *time.Ticker // Timer for sending pings to check if the peer is alive
 	addr       spec.Address // Peer's public address
 	peerPub    [32]byte     // Peer's pubkey (pre-set for outbound;  inbound connections
 	nodeKey    dnet.KeyPair // [const] to sign `Addr` messages (key for THIS node)
-	publicAddr spec.Address // [const] to include in `Addr` messages (address of THIS node)
 }
 
 func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, ns *NetService) *peerConn {
@@ -52,11 +47,9 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, 
 		isOutbound: outbound,
 		receive:    make(map[dnet.Tag4CC]chan dnet.Message),
 		send:       make(chan dnet.RawMessage, 100),
-		pingTimer:  time.NewTicker(PingInverval),
 		addr:       addr,
 		peerPub:    peerPub,
 		nodeKey:    ns.nodeKey,
-		publicAddr: ns.publicAddr,
 	}
 	return peer
 }
@@ -87,7 +80,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 		// 2. Wait for the "return announcement" from the peer.
 		msg, err := dnet.ReadMessage(reader)
 		if err != nil {
-			log.Printf("[%s] failed to receive from peer: %v", who, err)
+			log.Printf("[%s] failed to receive return announcement: %v", who, err)
 			peer.ns.closePeer(peer)
 			return
 		}
@@ -120,14 +113,14 @@ func (peer *peerConn) receiveFromPeer(who string) {
 		// 1. Wait for the [Node][Addr] announcement from the peer.
 		msg, err := dnet.ReadMessage(reader)
 		if err != nil {
-			log.Printf("[%s] failed to receive: %v", who, err)
+			log.Printf("[%s] failed to receive first inbound message: %v", who, err)
 			peer.ns.closePeer(peer)
 			return
 		}
 		copy(peer.peerPub[:], msg.PubKey)
 		who = fmt.Sprintf("%v/%v", hex.EncodeToString(peer.peerPub[0:6]), peer.addr.String())
 		// 2. Check if we received our own pubkey (connected to self)
-		if bytes.Equal(msg.PubKey, peer.nodeKey.Pub) {
+		if bytes.Equal(msg.PubKey, peer.nodeKey.Pub[:]) {
 			log.Printf("[%s] connected to self: [%v] (inbound connection)", who, hex.EncodeToString(msg.PubKey))
 			peer.ns.closePeer(peer)
 			return
@@ -167,7 +160,10 @@ func (peer *peerConn) receiveFromPeer(who string) {
 	for !peer.ns.Stopping() {
 		msg, err := dnet.ReadMessage(reader)
 		if err != nil {
-			log.Printf("[%s] failed to receive: %v", who, err)
+			if strings.Contains(err.Error(), "signature") {
+				log.Printf("[%s] failed to receive from peer: badness: %v", who, err)
+			}
+			log.Printf("[%s] failed to receive from peer: %v", who, err)
 			peer.ns.closePeer(peer)
 			return
 		}
@@ -177,7 +173,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 				// Received a [Node][Addr] announcement about some/any node.
 				// NB. This may broadcast a [Node][Addr] to all connected peers,
 				// excluding those still waiting for a "return announcement".
-				if bytes.Equal(msg.PubKey, peer.nodeKey.Pub) {
+				if bytes.Equal(msg.PubKey, peer.nodeKey.Pub[:]) {
 					log.Printf("[%s] ignored my own announce: [%v]", who, hex.EncodeToString(msg.PubKey))
 				} else {
 					who, err = peer.ingestAddress(msg)
@@ -187,16 +183,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 						return
 					}
 				}
-			} else if msg.Tag == TagPing {
-				// XXX should encode this once and re-use.
-				msg := dnet.EncodeMessage(node.ChannelNode, TagPong, peer.nodeKey, []byte{})
-				_, err := peer.conn.Write(msg)
-				if err != nil {
-					log.Printf("[%s] failed to send pong to peer: %v", who, err)
-					peer.ns.closePeer(peer)
-					return
-				}
-			} else if msg.Tag != TagPong {
+			} else {
 				log.Printf("[%s] ignored unknown [Node] message: [%v]", who, msg.Tag)
 			}
 		} else {
@@ -228,10 +215,10 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 			return "", fmt.Errorf("peer announced a private address: %v [%v]", peerAddr, hexpub)
 		}
 	}
-	// Check the timestamp: cannot be more than 30 days old, or more than 1 hour in the future.
+	// Check the timestamp: cannot be older than the expiry time, or too far into the future.
 	ts := addr.Time.Local()
 	now := time.Now()
-	if ts.Before(now.Add(OldestTime)) || ts.After(now.Add(NewestTime)) {
+	if ts.Before(now.Add(OldestAddrTime)) || ts.After(now.Add(NewestAddrTime)) {
 		return "", fmt.Errorf("peer timestamp out of range: %v vs %v (our time): %v [%v]", ts.String(), now.String(), peerAddr, hexpub)
 	}
 	// Update peer address and `who` string.
@@ -274,20 +261,10 @@ func (peer *peerConn) sendToPeer(who string) {
 				peer.ns.closePeer(peer)
 				return
 			}
-		case <-peer.pingTimer.C:
-			// XXX should encode this once and re-use.
-			msg := dnet.EncodeMessage(node.ChannelNode, TagPing, peer.nodeKey, []byte{})
-			_, err := peer.conn.Write(msg)
-			if err != nil {
-				log.Printf("[%s] failed to send ping to peer: %v", who, err)
-				peer.ns.closePeer(peer)
-				return
-			}
 		case <-peer.ns.Context.Done():
 			// shutting down
 			// no race: peer.peerPub is final before sendToPeer starts (closePeer OK to read peer.peerPub)
 			peer.ns.closePeer(peer)
-			peer.pingTimer.Stop()
 			return
 		}
 	}

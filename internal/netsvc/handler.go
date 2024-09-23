@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync/atomic"
 
+	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/gossip/dnet"
 )
 
@@ -47,6 +48,19 @@ func (hand *handlerConn) receiveFromHandler() {
 	}
 	atomic.StoreUint32(&hand.channel, uint32(bind.Chan))
 	log.Printf("[%s] handler bound to channel: [%v]", hand.name, bind.Chan)
+	// forward the owner pubkey to the announce service
+	// only from the [Iden] pup
+	if bind.Chan == dnet.ChannelIdentity {
+		hand.ns.announceChanges <- spec.ChangeOwnerKey{Key: &bind.PubKey}
+	}
+	// send bind message in reply, with node pubkey
+	reply := dnet.BindMessage{Version: 1, Chan: bind.Chan, PubKey: *hand.ns.nodeKey.Pub}
+	_, err = hand.conn.Write(reply.Encode())
+	if err != nil {
+		log.Printf("[%s] cannot send BindMessage: %v", hand.name, err)
+		hand.ns.closeHandler(hand)
+		return
+	}
 	// start forwarding messages to the handler
 	go hand.sendToHandler()
 	// start receiving messages from the handler
@@ -64,13 +78,10 @@ func (hand *handlerConn) receiveFromHandler() {
 }
 
 func (hand *handlerConn) readBindMessage(reader io.Reader) (bind dnet.BindMessage, err error) {
-	buf := [8]byte{}
-	n, err := io.ReadAtLeast(reader, buf[:], 8)
+	buf := [dnet.BindMessageSize]byte{}
+	_, err = io.ReadAtLeast(reader, buf[:], len(buf))
 	if err != nil {
 		return bind, fmt.Errorf("[%s] cannot read bind message from handler: %v", hand.name, err)
-	}
-	if n != 8 {
-		return bind, fmt.Errorf("[%s] short bind message: %v vs %v", hand.name, n, 8)
 	}
 	bind, ok := dnet.DecodeBindMessage(buf[:])
 	if !ok {
