@@ -35,4 +35,7 @@ type StoreCtx interface {
 	ChooseNetNodeMsg() (NodeRecord, error)
 	SampleNodesByChannel(channels []dnet.Tag4CC, exclude [][]byte) ([]NodeInfo, error)
 	SampleNodesByIP(ipaddr net.IP, exclude [][]byte) ([]NodeInfo, error)
+	// registered channels
+	GetChannels() (channels []dnet.Tag4CC, err error)
+	AddChannel(channel dnet.Tag4CC) error
 }

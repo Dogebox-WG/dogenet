@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"log"
-	"slices"
 	"time"
 
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -68,17 +67,13 @@ func (ns *Announce) Run() {
 				ns.nextAnnounce.Owner = msg.Key[:]
 				log.Printf("[announce] received new owner key: %v", hex.EncodeToString(msg.Key[:]))
 			case spec.ChangeChannel:
-				if msg.Remove {
-					ns.nextAnnounce.Channels = slices.DeleteFunc(ns.nextAnnounce.Channels, func(e dnet.Tag4CC) bool {
-						return e == msg.Tag
-					})
-					log.Printf("[announce] received remove channel: %v", msg.Tag)
+				channels, err := ns.cstore.GetChannels()
+				if err != nil {
+					log.Printf("[announce] %v", err)
 				} else {
-					if !slices.Contains(ns.nextAnnounce.Channels, msg.Tag) {
-						ns.nextAnnounce.Channels = append(ns.nextAnnounce.Channels, msg.Tag)
-					}
-					log.Printf("[announce] received add channel: %v", msg.Tag)
+					ns.nextAnnounce.Channels = channels
 				}
+				log.Printf("[announce] received new channels: %v", channels)
 			default:
 				log.Printf("[announce] invalid change message received")
 				continue
@@ -109,12 +104,25 @@ func (ns *Announce) Run() {
 }
 
 func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Duration, ok bool) {
+	// load stored channel list to include in our announcement
+	// XXX load stored owner pubkey so IsValid() can return true
+	channels, err := ns.cstore.GetChannels()
+	if err != nil {
+		log.Printf("[announce] cannot load channels: %v", err)
+		return dnet.RawMessage{}, AnnounceLongevity, false
+	}
+	ns.nextAnnounce.Channels = channels // initial set of channels
+	if !ns.nextAnnounce.IsValid() {
+		return dnet.RawMessage{}, AnnounceLongevity, false
+	}
 	// load the stored announcement from the database
 	oldPayload, sig, expires, err := ns.cstore.GetAnnounce()
-	now := time.Now().Unix()
 	if err != nil {
 		log.Printf("[announce] cannot load announcement: %v", err)
-	} else if len(oldPayload) >= node.AddrMsgMinSize && len(sig) == 64 && now < expires {
+		return ns.generateAnnounce(ns.nextAnnounce)
+	}
+	now := time.Now().Unix()
+	if len(oldPayload) >= node.AddrMsgMinSize && len(sig) == 64 && now < expires {
 		// determine if the announcement we stored is the same as the announcement
 		// we would produce now; if so, avoid signing and gossiping a new announcement
 		oldMsg := node.DecodeAddrMsg(oldPayload) // for Time
@@ -132,12 +140,12 @@ func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Dura
 }
 
 func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (raw dnet.RawMessage, rem time.Duration, ok bool) {
-	if !ns.nextAnnounce.IsValid() {
+	if !newMsg.IsValid() {
 		return dnet.RawMessage{}, AnnounceLongevity, false
 	}
-	log.Printf("[announce] signing a new announcement")
 	now := time.Now()
 	newMsg.Time = dnet.UnixToDoge(now)
+	log.Printf("[announce] signing a new announcement: %v", newMsg)
 	payload := newMsg.Encode()
 	msg := dnet.EncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey, payload)
 	view := dnet.MsgView(msg)

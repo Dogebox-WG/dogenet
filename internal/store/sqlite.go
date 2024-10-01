@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS announce (
 	sig BLOB NOT NULL,
 	time INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS channels (
+	chan INTEGER NOT NULL PRIMARY KEY,
+	dayc INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS core (
 	address BLOB NOT NULL PRIMARY KEY,
 	time DATETIME NOT NULL,
@@ -468,6 +472,46 @@ func (s SQLiteStoreCtx) SetAnnounce(payload []byte, sig []byte, time int64) erro
 		}
 		if num == 0 {
 			_, err = tx.Exec("INSERT INTO announce (payload,sig,time) VALUES (?,?,?)", payload, sig, time)
+		}
+		return err
+	})
+}
+
+func (s SQLiteStoreCtx) GetChannels() (channels []dnet.Tag4CC, err error) {
+	err = s.doTxn("GetChannels", func(tx *sql.Tx) error {
+		rows, err := tx.Query("SELECT chan FROM channels")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ch uint32
+			err = rows.Scan(&ch)
+			if err != nil {
+				return dbErr(err, "GetChannels: scanning row")
+			}
+			channels = append(channels, dnet.Tag4CC(ch))
+		}
+		if err = rows.Err(); err != nil { // docs say this check is required!
+			return dbErr(err, "GetChannels: querying channels")
+		}
+		return nil
+	})
+	return
+}
+
+func (s SQLiteStoreCtx) AddChannel(channel dnet.Tag4CC) error {
+	return s.doTxn("AddChannel", func(tx *sql.Tx) error {
+		res, err := tx.Exec("UPDATE channels SET dayc=7+(SELECT dayc FROM config LIMIT 1) WHERE chan=?", channel)
+		if err != nil {
+			return err
+		}
+		num, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if num == 0 {
+			_, err = tx.Exec("INSERT INTO channels (chan,dayc) VALUES (?,7+(SELECT dayc FROM config LIMIT 1))", channel)
 		}
 		return err
 	})

@@ -46,14 +46,24 @@ func (hand *handlerConn) receiveFromHandler() {
 		hand.ns.closeHandler(hand)
 		return
 	}
+	// set our channel so forwardToHandlers will start sending us messages.
 	atomic.StoreUint32(&hand.channel, uint32(bind.Chan))
 	log.Printf("[%s] handler bound to channel: [%v]", hand.name, bind.Chan)
+	// add the channel in the database (or update time)
+	store := hand.ns.cstore
+	err = store.AddChannel(bind.Chan)
+	if err != nil {
+		log.Println(err.Error())
+		hand.ns.closeHandler(hand)
+		return
+	}
 	// forward the owner pubkey to the announce service
-	// only from the [Iden] pup
+	// only when received from the [Iden] pup
 	if bind.Chan == dnet.ChannelIdentity {
 		hand.ns.announceChanges <- spec.ChangeOwnerKey{Key: &bind.PubKey}
+		hand.ns.announceChanges <- spec.ChangeChannel{Chan: bind.Chan}
 	}
-	// send bind message in reply, with node pubkey
+	// send bind message in reply, with this node's pubkey
 	reply := dnet.BindMessage{Version: 1, Chan: bind.Chan, PubKey: *hand.ns.nodeKey.Pub}
 	_, err = hand.conn.Write(reply.Encode())
 	if err != nil {
