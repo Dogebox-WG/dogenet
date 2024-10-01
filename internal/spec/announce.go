@@ -15,6 +15,5 @@ type ChangeOwnerKey struct {
 }
 
 type ChangeChannel struct {
-	Tag    dnet.Tag4CC
-	Remove bool
+	Chan dnet.Tag4CC
 }

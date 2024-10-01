@@ -20,8 +20,10 @@ import (
 const IdealPeers = 8
 const ProtocolSocket = "/tmp/dogenet.sock"
 const PeerLockTime = 30 * time.Second          // was 5 minutes, now 30 seconds
+const SeedAttemptTime = 60 * time.Second       // time between seed connect attempts
 const GossipAddressInverval = 25 * time.Second // gossip a random address to the peer
 const GossipAddressRandom = 10                 // randomness in the interval, in seconds
+const SeedDNS = "seed.dogecoin.org"            // seed peer addresses (DNS lookup)
 
 type NetService struct {
 	governor.ServiceCtx
@@ -68,6 +70,7 @@ func (ns *NetService) Run() {
 	go ns.acceptHandlers()
 	go ns.findPeers()
 	go ns.gossipRandomAddresses()
+	go ns.seedFromDNS()
 	wg.Wait()
 }
 
@@ -136,7 +139,7 @@ func (ns *NetService) acceptIncoming(listner net.Listener, who string, wg *sync.
 		if err != nil {
 			log.Printf("[%s] no remote address for inbound peer: %v", who, err)
 		}
-		peer := newPeer(conn, remote, NoPubKey, false, ns) // inbound connection
+		peer := newPeer(conn, remote, NoPubKey, false, false, ns) // inbound connection
 		if ns.trackPeer(conn, peer, NoPubKey) {
 			log.Printf("[%s] peer connected (inbound): %v", who, remote)
 			// this peer will call adoptPeer once is receives the peer pubKey.
@@ -214,7 +217,7 @@ func (ns *NetService) findPeers() {
 			if err != nil {
 				log.Printf("[%s] connect failed: %v", who, err)
 			} else {
-				peer := newPeer(conn, node.Addr, node.PubKey, true, ns) // outbound connection
+				peer := newPeer(conn, node.Addr, node.PubKey, true, true, ns) // outbound connection
 				if ns.trackPeer(conn, peer, node.PubKey) {
 					log.Printf("[%s] connected to peer (outbound): %v [%v]", who, node.Addr, pubHex)
 					peer.start()
@@ -225,6 +228,7 @@ func (ns *NetService) findPeers() {
 				}
 			}
 		}
+		ns.Sleep(5 * time.Second) // slowly
 	}
 }
 
@@ -440,5 +444,50 @@ func (ns *NetService) closeHandler(hand *handlerConn) {
 			ns.handlers = ns.handlers[:len(ns.handlers)-1]
 			break
 		}
+	}
+}
+
+// goroutine
+func (ns *NetService) seedFromDNS() {
+	who := "seed-from-dns"
+	var seed_ips []net.IP
+	for !ns.Stopping() {
+		var err error
+		seed_ips, err = net.LookupIP(SeedDNS)
+		if err != nil {
+			log.Printf("[%s] cannot resolve seed: %v: %v", who, SeedDNS, err)
+		} else if len(seed_ips) > 0 {
+			break
+		}
+		ns.Sleep(SeedAttemptTime)
+	}
+	log.Printf("[%s] resolved seeds: %v", who, seed_ips)
+	for len(seed_ips) > 0 && !ns.Stopping() {
+		// choose a random remaining ip address
+		idx := rand.Intn(len(seed_ips))
+		ip := seed_ips[idx]
+		log.Printf("[%s] connecting to seed node: %v", who, ip)
+		d := net.Dialer{Timeout: 30 * time.Second}
+		remote := dnet.Address{Host: ip, Port: dnet.DogeNetDefaultPort}
+		conn, err := d.DialContext(ns.Context, "tcp", remote.String())
+		if err != nil {
+			log.Printf("[%s] connect failed: %v", who, err)
+		} else {
+			peer := newPeer(conn, remote, NoPubKey, true, false, ns) // outbound connection
+			if ns.trackPeer(conn, peer, NoPubKey) {
+				log.Printf("[%s] seed node connected (outbound): %v", who, remote)
+				// this peer will call adoptPeer once is receives the peer pubKey.
+				peer.start()
+			} else { // Stop was called
+				log.Printf("[%s] dropped seed node, shutting down: %v", who, remote)
+				conn.Close()
+				return
+			}
+		}
+		// remove from unordered array
+		seed_ips[idx] = seed_ips[len(seed_ips)-1]
+		seed_ips = seed_ips[:len(seed_ips)-1]
+		// always proceed slowly
+		ns.Sleep(SeedAttemptTime)
 	}
 }

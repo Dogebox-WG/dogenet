@@ -30,21 +30,23 @@ type peerConn struct {
 	store      spec.StoreCtx
 	allowLocal bool
 	isOutbound bool
+	hasPub     bool // has a peer pubkey
 	receive    map[dnet.Tag4CC]chan dnet.Message
 	send       chan dnet.RawMessage // raw message
 	mutex      sync.Mutex
 	addr       spec.Address // Peer's public address
-	peerPub    [32]byte     // Peer's pubkey (pre-set for outbound;  inbound connections
+	peerPub    [32]byte     // Peer's pubkey (pre-set for outbound, if known)
 	nodeKey    dnet.KeyPair // [const] to sign `Addr` messages (key for THIS node)
 }
 
-func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, ns *NetService) *peerConn {
+func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, hasPub bool, ns *NetService) *peerConn {
 	peer := &peerConn{
 		ns:         ns,
 		conn:       conn,
 		store:      ns.cstore,
 		allowLocal: ns.allowLocal, // allow local IP address in Announcement messages (for local testing)
 		isOutbound: outbound,
+		hasPub:     hasPub,
 		receive:    make(map[dnet.Tag4CC]chan dnet.Message),
 		send:       make(chan dnet.RawMessage, 100),
 		addr:       addr,
@@ -69,7 +71,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 	conn := peer.conn
 	reader := bufio.NewReader(conn)
 	if peer.isOutbound {
-		// An outbound connection; we know the peer's PubKey.
+		// An outbound connection; we send the initial announce message.
 		// 1. MUST announce THIS node's [Node][Addr] on outbound connections.
 		err := peer.sendMyAddress(conn)
 		if err != nil {
@@ -91,12 +93,31 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			return
 		}
 		// 4. We ALWAYS know the PeerPub for outbound connections.
-		if !bytes.Equal(msg.PubKey, peer.peerPub[:]) {
-			log.Printf("[%s] connected to wrong peer: found PubKey %v but expected %v", who, hex.EncodeToString(msg.PubKey), hex.EncodeToString(peer.peerPub[:]))
+		// Except when connecting to DNS seed nodes.
+		if peer.hasPub {
+			if !bytes.Equal(msg.PubKey, peer.peerPub[:]) {
+				log.Printf("[%s] connected to wrong peer: found PubKey %v but expected %v", who, hex.EncodeToString(msg.PubKey), hex.EncodeToString(peer.peerPub[:]))
+				peer.ns.closePeer(peer)
+				return
+			}
+		} else {
+			copy(peer.peerPub[:], msg.PubKey)
+			who = fmt.Sprintf("%v/%v", hex.EncodeToString(peer.peerPub[0:6]), peer.addr.String())
+			// Check if we're already connected to this peer
+			// Only call this if we started with NoPubKey (hasPub == false)
+			if !peer.ns.adoptPeer(peer, peer.peerPub) {
+				log.Printf("[%s] already connected to peer: [%v] (inbound connection)", who, hex.EncodeToString(msg.PubKey))
+				peer.ns.closePeer(peer)
+				return
+			}
+		}
+		// 5. Check if we received our own pubkey (connected to self)
+		if bytes.Equal(msg.PubKey, peer.nodeKey.Pub[:]) {
+			log.Printf("[%s] connected to self: [%v] (outbound connection)", who, hex.EncodeToString(msg.PubKey))
 			peer.ns.closePeer(peer)
 			return
 		}
-		// 5. Update the peer address, timestamp, etc in our database.
+		// 6. Update the peer address, timestamp, etc in our database.
 		// NB. This may broadcast a [Node][Addr] to other connected peers.
 		newwho, err := peer.ingestAddress(msg)
 		if err != nil {
@@ -106,7 +127,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 		} else {
 			who = newwho
 		}
-		// 6. OK to start forwaring messages to the peer now.
+		// 7. OK to start forwaring messages to the peer now.
 		go peer.sendToPeer(who)
 	} else {
 		// MUST be an inbound connection.
