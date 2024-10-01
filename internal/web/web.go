@@ -11,12 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"code.dogecoin.org/governor"
-
-	"code.dogecoin.org/gossip/dnet"
-	"code.dogecoin.org/gossip/icon"
-
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/gossip/dnet"
+	"code.dogecoin.org/governor"
 )
 
 func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Service {
@@ -30,7 +27,6 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Servi
 		netSvc: netSvc,
 	}
 	mux.HandleFunc("/nodes", a.getNodes)
-	mux.HandleFunc("/compress", a.compress)
 	mux.HandleFunc("/addpeer", a.addpeer)
 
 	fs := http.FileServer(http.Dir("./web"))
@@ -85,45 +81,6 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 		w.Write(bytes)
 	} else {
 		options(w, r, "GET, OPTIONS")
-	}
-}
-
-const imgSizeRGB = 48 * 48 * 3
-const imgSizeRGBA = 48 * 48 * 4
-
-func (a *WebAPI) compress(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		// post body must be binary 48x48 RGB or RGBA
-		stride := 3
-		if len(body) == imgSizeRGBA {
-			stride = 4
-		} else if len(body) != imgSizeRGB {
-			http.Error(w, fmt.Sprintf("bad request: size is %d, expecting %d or %d", len(body), imgSizeRGB, imgSizeRGBA), http.StatusBadRequest)
-			return
-		}
-
-		// parse ?options=123
-		options := 0
-		opts := r.URL.Query().Get("options")
-		if opti, err := strconv.Atoi(opts); err == nil {
-			options = opti
-		}
-		log.Printf("Options: %v", options)
-
-		_, res := icon.Compress(body, stride, options)
-
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
-		w.Header().Set("Allow", "POST, OPTIONS")
-		w.Write(res[:])
-	} else {
-		options(w, r, "POST, OPTIONS")
 	}
 }
 
