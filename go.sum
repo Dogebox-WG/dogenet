@@ -6,8 +6,8 @@ github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 h1:rpfIENRNNilwHwZeG5+P150SMrnN
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0/go.mod h1:v57UDF4pDQJcEfFUCRop3lJL149eHGSe9Jvczhzjo/0=
 github.com/dogeorg/doge v0.0.12 h1:Uj28ZL8wZxf7EiWyHu2czHzi6vWCzCCOdv75HTjbH2k=
 github.com/dogeorg/doge v0.0.12/go.mod h1:Q9/0XChJ8EA54OrhjkWm+ySEm0zZ5M7C38do/ZCnZuY=
-github.com/dogeorg/gossip v0.0.17 h1:88T1162omLoTZu9WEQ4a67Tz7iLyn0EA4i/2eJSuKHk=
-github.com/dogeorg/gossip v0.0.17/go.mod h1:tu1/VgSCPBfXLUyFeywAOUQuwACk9xzRUbd4ychdz/o=
+github.com/dogeorg/gossip v0.0.18 h1:/ZaXnnfNGiHL6aAFonXE1ju4uwioS/Ub7llix3GypX0=
+github.com/dogeorg/gossip v0.0.18/go.mod h1:tu1/VgSCPBfXLUyFeywAOUQuwACk9xzRUbd4ychdz/o=
 github.com/dogeorg/governor v1.0.2 h1:bDjB89rBmrtyerRF8Mh3fP2RYs/p4esdFKkApQgWab8=
 github.com/dogeorg/governor v1.0.2/go.mod h1:sYCXRKKmwZvvzEFjjP2RRkUMbFMwVmXp3vEQf1vkzj4=
 github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
