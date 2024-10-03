@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 CREATE TABLE IF NOT EXISTS core (
 	address BLOB NOT NULL PRIMARY KEY,
-	time DATETIME NOT NULL,
+	time INTEGER NOT NULL,
 	services INTEGER NOT NULL,
 	isnew BOOLEAN NOT NULL,
 	dayc INTEGER NOT NULL
@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS core_isnew_i ON core (isnew);
 CREATE TABLE IF NOT EXISTS node (
 	key BLOB NOT NULL PRIMARY KEY,
 	address BLOB NOT NULL,
-	time DATETIME NOT NULL,
+	time INTEGER NOT NULL,
 	owner BLOB NOT NULL,
 	payload BLOB NOT NULL,
 	sig BLOB NOT NULL,
@@ -251,26 +251,28 @@ func (s SQLiteStoreCtx) NetStats() (mapSize int, err error) {
 }
 
 func (s SQLiteStoreCtx) coreNodeList(tx *sql.Tx) (res []spec.CoreNode, err error) {
-	rows, err := tx.Query("SELECT address,time,services FROM core")
+	rows, err := tx.Query("SELECT address,CAST(time AS INTEGER),services FROM core")
 	if err != nil {
 		return nil, fmt.Errorf("[Store] coreNodeList: query: %v", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var addr []byte
-		var time int64
+		var unixTime int64
 		var services uint64
-		err := rows.Scan(&addr, &time, &services)
+		err := rows.Scan(&addr, &unixTime, &services)
 		if err != nil {
-			return nil, fmt.Errorf("[Store] coreNodeList: scanning row: %v", err)
+			log.Printf("[Store] coreNodeList: scanning row: %v", err)
+			continue
 		}
 		s_adr, err := dnet.AddressFromBytes(addr)
 		if err != nil {
-			return nil, fmt.Errorf("[Store] bad node address: %v", err)
+			log.Printf("[Store] bad node address: %v", err)
+			continue
 		}
 		res = append(res, spec.CoreNode{
 			Address:  s_adr.String(),
-			Time:     time,
+			Time:     unixTime,
 			Services: services,
 		})
 	}
@@ -282,7 +284,7 @@ func (s SQLiteStoreCtx) coreNodeList(tx *sql.Tx) (res []spec.CoreNode, err error
 
 func (s SQLiteStoreCtx) netNodeList(tx *sql.Tx) (res []spec.NetNode, err error) {
 	// use payload because it contains all the channels
-	rows, err := tx.Query("SELECT key,payload,time FROM node")
+	rows, err := tx.Query("SELECT key,payload,CAST(time AS INTEGER) FROM node")
 	if err != nil {
 		return nil, fmt.Errorf("[Store] netNodeList: query: %v", err)
 	}
@@ -363,6 +365,7 @@ func (s SQLiteStoreCtx) TrimNodes() (advanced bool, remCore int64, remNode int64
 			if err != nil {
 				return fmt.Errorf("TrimNodes: UPDATE config: %v", err)
 			}
+
 			// expire core nodes
 			res, err := tx.Exec("DELETE FROM core WHERE dayc < ?", dayc)
 			if err != nil {
@@ -372,10 +375,21 @@ func (s SQLiteStoreCtx) TrimNodes() (advanced bool, remCore int64, remNode int64
 			if err != nil {
 				return fmt.Errorf("TrimNodes: rows-affected: %v", err)
 			}
+
 			// expire net nodes
 			res, err = tx.Exec("DELETE FROM node WHERE dayc < ?", dayc)
 			if err != nil {
 				return fmt.Errorf("TrimNodes: DELETE node: %v", err)
+			}
+			remNode, err = res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("TrimNodes: rows-affected: %v", err)
+			}
+
+			// expire channels
+			res, err = tx.Exec("DELETE FROM channels WHERE dayc < ?", dayc)
+			if err != nil {
+				return fmt.Errorf("TrimNodes: DELETE channel: %v", err)
 			}
 			remNode, err = res.RowsAffected()
 			if err != nil {

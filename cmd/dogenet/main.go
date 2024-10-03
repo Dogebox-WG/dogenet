@@ -17,6 +17,7 @@ import (
 
 	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/core/collector"
+	"code.dogecoin.org/dogenet/internal/geoip"
 	"code.dogecoin.org/dogenet/internal/netsvc"
 	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/dogenet/internal/store"
@@ -26,6 +27,7 @@ import (
 const WebAPIDefaultPort = 8085
 const CoreNodeDefaultPort = 22556
 const StoreFilename = "storage/dogenet.db"
+const GeoIPFile = "storage/dbip-city-ipv4-num.csv"
 
 func main() {
 	var crawl int
@@ -173,9 +175,18 @@ func main() {
 		gov.Add(fmt.Sprintf("crawler-%d", n), collector.New(db, store.Address{}, 5*time.Minute, false))
 	}
 
+	// load the geoIP database
+	// https://github.com/sapics/ip-location-db/tree/main/dbip-city/dbip-city-ipv4-num.csv.gz
+	log.Printf("loading GeoIP database: %v", GeoIPFile)
+	geoIP, err := geoip.NewGeoIPDatabase(GeoIPFile)
+	if err != nil {
+		log.Printf("Error reading GeoIP database: %v [%s]\n", err, GeoIPFile)
+		os.Exit(1)
+	}
+
 	// start the web server.
 	for _, bind := range bindweb {
-		gov.Add("web-api", web.New(bind, db, netSvc))
+		gov.Add("web-api", web.New(bind, db, netSvc, geoIP))
 	}
 
 	// start the store trimmer

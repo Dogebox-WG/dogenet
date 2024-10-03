@@ -1,5 +1,6 @@
 github.com/btcsuite/golangcrypto v0.0.0-20150304025918-53f62d9b43e8 h1:nOsAWScwueMVk/VLm/dvQQD7DuanyvAUb6B3P3eT274=
 github.com/btcsuite/golangcrypto v0.0.0-20150304025918-53f62d9b43e8/go.mod h1:tYvUd8KLhm/oXvUeSEs2VlLghFjQt9+ZaF9ghH0JNjc=
+github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/decred/dcrd/crypto/blake256 v1.1.0 h1:zPMNGQCm0g4QTY27fOCorQW7EryeQ/U0x++OzVrdms8=
 github.com/decred/dcrd/crypto/blake256 v1.1.0/go.mod h1:2OfgNZ5wDpcsFmHmCK5gZTPcCXqlm2ArzUIkw9czNJo=
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 h1:rpfIENRNNilwHwZeG5+P150SMrnNEcHYvcCuK6dPZSg=
@@ -14,3 +15,10 @@ github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/mr-tron/base58 v1.2.0 h1:T/HDJBh4ZCPbU39/+c3rRvE0uKBQlU27+QI8LJ4t64o=
 github.com/mr-tron/base58 v1.2.0/go.mod h1:BinMc/sQntlIE1frQmRFPUoPA1Zkr8VRgBdjWI2mNwc=
+github.com/philpearl/intern v0.0.1 h1:Jr66eMQ8FzsZ8VzSYITtsqSylmqx0rgRvkk+ZWWg5cw=
+github.com/philpearl/intern v0.0.1/go.mod h1:1G/lIlEf4dlvBTx7JLN/nFXhKL6ArgJqOO+tlOiESpw=
+github.com/philpearl/stringbank v1.2.0 h1:1iFAiMY3rEeUAoOdaHmIU2B/bc47huoe8ve+I8GrCFM=
+github.com/philpearl/stringbank v1.2.0/go.mod h1:0V0f9Ba79DpIl4FTfotL+7IJ+etELdRQIcHJY2nX/+w=
+github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=

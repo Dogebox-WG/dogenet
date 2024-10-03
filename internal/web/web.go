@@ -11,12 +11,15 @@ import (
 	"strconv"
 	"time"
 
+	"code.dogecoin.org/dogenet/internal/geoip"
 	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/governor"
 )
 
-func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Service {
+const AllowOrigin = "http://localhost:8000"
+
+func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.GeoIPDatabase) governor.Service {
 	mux := http.NewServeMux()
 	a := &WebAPI{
 		store: store,
@@ -25,6 +28,7 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Servi
 			Handler: mux,
 		},
 		netSvc: netSvc,
+		geoIP:  geoIP,
 	}
 	mux.HandleFunc("/nodes", a.getNodes)
 	mux.HandleFunc("/addpeer", a.addpeer)
@@ -41,6 +45,7 @@ type WebAPI struct {
 	cstore spec.StoreCtx
 	srv    http.Server
 	netSvc spec.NetSvc
+	geoIP  *geoip.GeoIPDatabase
 }
 
 // called on any
@@ -63,6 +68,15 @@ func (a *WebAPI) Run() {
 	}
 }
 
+type MapNode struct {
+	SubVer  string  `json:"subver"`
+	Lat     string  `json:"lat"`
+	Lon     string  `json:"lon"`
+	City    string  `json:"city"`
+	Country string  `json:"country"`
+	IPInfo  *string `json:"ipinfo"` // can encode null
+}
+
 func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		list, err := a.cstore.NodeList()
@@ -70,13 +84,49 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("error in query: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
-		bytes, err := json.Marshal(list)
+		// dogemap expects a flat array with latitude and longitude
+		var nodes []MapNode
+		for _, core := range list.Core {
+			addr, err := dnet.ParseAddress(core.Address)
+			if err != nil {
+				log.Printf("[GET /nodes] invalid core address: %v", core.Address)
+				continue
+			}
+			lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
+			nodes = append(nodes, MapNode{
+				SubVer:  core.Address,
+				Lat:     lat,
+				Lon:     lon,
+				Country: country,
+				City:    city,
+				IPInfo:  nil,
+			})
+		}
+		for _, net := range list.Net {
+			addr, err := dnet.ParseAddress(net.Address)
+			if err != nil {
+				log.Printf("[GET /nodes] invalid core address: %v", net.Address)
+				continue
+			}
+			lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
+			nodes = append(nodes, MapNode{
+				SubVer:  net.Address,
+				Lat:     lat,
+				Lon:     lon,
+				Country: country,
+				City:    city,
+				IPInfo:  nil,
+			})
+		}
+
+		bytes, err := json.Marshal(nodes)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error encoding JSON: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(bytes)))
+		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", "GET, OPTIONS")
 		w.Write(bytes)
 	} else {
@@ -127,6 +177,7 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
+		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", "POST, OPTIONS")
 		w.Write(res[:])
 	} else {
@@ -137,10 +188,12 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 func options(w http.ResponseWriter, r *http.Request, options string) {
 	switch r.Method {
 	case http.MethodOptions:
+		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", options)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
+		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", options)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
