@@ -33,9 +33,6 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.G
 	mux.HandleFunc("/nodes", a.getNodes)
 	mux.HandleFunc("/addpeer", a.addpeer)
 
-	fs := http.FileServer(http.Dir("./web"))
-	mux.Handle("/web/", http.StripPrefix("/web/", fs))
-
 	return a
 }
 
