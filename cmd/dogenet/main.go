@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -26,8 +27,8 @@ import (
 
 const WebAPIDefaultPort = 8085
 const CoreNodeDefaultPort = 22556
-const StoreFilename = "storage/dogenet.db"
-const GeoIPFile = "storage/dbip-city-ipv4-num.csv"
+const DBFile = "dogenet.db"
+const GeoIPFile = "dbip-city-ipv4-num.csv"
 
 func main() {
 	var crawl int
@@ -37,12 +38,24 @@ func main() {
 	public := dnet.Address{}
 	core := dnet.Address{}
 	peers := []spec.NodeInfo{}
-	dbfile := StoreFilename
-
+	dbfile := DBFile
+	dir := "./storage"
+	stderr := log.New(os.Stderr, "", 0)
+	flag.Func("dir", "<path> - storage directory (default '.')", func(arg string) error {
+		ent, err := os.Stat(arg)
+		if err != nil {
+			stderr.Fatalf("--dir: %v", err)
+		}
+		if !ent.IsDir() {
+			stderr.Fatalf("--dir: not a directory: %v", arg)
+		}
+		dir = arg
+		return nil
+	})
 	flag.IntVar(&crawl, "crawl", 0, "number of core node crawlers")
-	flag.StringVar(&dbfile, "db", StoreFilename, "path to SQLite database")
+	flag.StringVar(&dbfile, "db", DBFile, "path to SQLite database (relative: in storage dir)")
 	flag.BoolVar(&allowLocal, "local", false, "allow local 'public' addresses (for testing)")
-	flag.Func("bind", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+	flag.Func("bind", "Bind gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		addr, err := parseIPPort(arg, "bind", dnet.DogeNetDefaultPort)
 		if err != nil {
 			return err
@@ -50,7 +63,7 @@ func main() {
 		binds = append(binds, addr)
 		return nil
 	})
-	flag.Func("web", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+	flag.Func("web", "Bind web API <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		addr, err := parseIPPort(arg, "web", WebAPIDefaultPort)
 		if err != nil {
 			return err
@@ -58,7 +71,7 @@ func main() {
 		bindweb = append(bindweb, addr)
 		return nil
 	})
-	flag.Func("public", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+	flag.Func("public", "Set public (router) gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		// use DogeNetDefaultPort by default (rather than the --bind port)
 		// this is typically correct even if bind-port is something different
 		addr, err := parseIPPort(arg, "public", dnet.DogeNetDefaultPort)
@@ -149,9 +162,10 @@ func main() {
 	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub[:]))
 
 	// load the previously saved state.
-	db, err := store.NewSQLiteStore(dbfile, context.Background())
+	dbpath := path.Join(dir, dbfile)
+	db, err := store.NewSQLiteStore(dbpath, context.Background())
 	if err != nil {
-		log.Printf("Error opening database: %v [%s]\n", err, dbfile)
+		log.Printf("Error opening database: %v [%s]\n", err, dbpath)
 		os.Exit(1)
 	}
 
@@ -177,10 +191,11 @@ func main() {
 
 	// load the geoIP database
 	// https://github.com/sapics/ip-location-db/tree/main/dbip-city/dbip-city-ipv4-num.csv.gz
-	log.Printf("loading GeoIP database: %v", GeoIPFile)
-	geoIP, err := geoip.NewGeoIPDatabase(GeoIPFile)
+	geoFile := path.Join(dir, GeoIPFile)
+	log.Printf("loading GeoIP database: %v", geoFile)
+	geoIP, err := geoip.NewGeoIPDatabase(geoFile)
 	if err != nil {
-		log.Printf("Error reading GeoIP database: %v [%s]\n", err, GeoIPFile)
+		log.Printf("Error reading GeoIP database: %v [%s]\n", err, geoFile)
 		os.Exit(1)
 	}
 
