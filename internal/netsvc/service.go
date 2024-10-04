@@ -18,7 +18,6 @@ import (
 )
 
 const IdealPeers = 8
-const ProtocolSocket = "/tmp/dogenet.sock"
 const PeerLockTime = 30 * time.Second          // was 5 minutes, now 30 seconds
 const SeedAttemptTime = 60 * time.Second       // time between seed connect attempts
 const GossipAddressInverval = 25 * time.Second // gossip a random address to the peer
@@ -28,7 +27,8 @@ const SeedDNS = "seed.dogecoin.org"            // seed peer addresses (DNS looku
 type NetService struct {
 	governor.ServiceCtx
 	bindAddrs       []spec.Address // bind-to address on THIS node
-	allowLocal      bool           // allow local IP address in Announcement messages (for local testing)
+	handlerBind     spec.BindTo
+	allowLocal      bool // allow local IP address in Announcement messages (for local testing)
 	store           spec.Store
 	cstore          spec.StoreCtx
 	nodeKey         dnet.KeyPair
@@ -49,9 +49,10 @@ type MapPubKey = [32]byte
 
 var NoPubKey [32]byte // zeroes
 
-func New(bind []spec.Address, nodeKey dnet.KeyPair, store spec.Store, allowLocal bool, announceChanges chan any) spec.NetSvc {
+func New(bind []spec.Address, handlerBind spec.BindTo, nodeKey dnet.KeyPair, store spec.Store, allowLocal bool, announceChanges chan any) spec.NetSvc {
 	return &NetService{
 		bindAddrs:       bind,
+		handlerBind:     handlerBind,
 		allowLocal:      allowLocal,
 		store:           store,
 		nodeKey:         nodeKey,
@@ -156,12 +157,16 @@ func (ns *NetService) acceptIncoming(listner net.Listener, who string, wg *sync.
 func (ns *NetService) acceptHandlers() {
 	who := "accept-handlers"
 	var err error
-	os.Remove(ProtocolSocket)
-	ns.socket, err = net.Listen("unix", ProtocolSocket)
+	if ns.handlerBind.Network == "unix" {
+		// in case the prior process was killed.
+		os.Remove(ns.handlerBind.Address)
+	}
+	ns.socket, err = net.Listen(ns.handlerBind.Network, ns.handlerBind.Address)
 	if err != nil {
-		log.Printf("[%s] cannot create unix socket %s: %v", who, ProtocolSocket, err)
+		log.Printf("[%s] cannot listen on %v: %v", who, ns.handlerBind, err)
 		return
 	}
+	log.Printf("[%s] listening on: %v", who, ns.handlerBind.Address)
 	for !ns.Stopping() {
 		// Accept an incoming connection.
 		conn, err := ns.socket.Accept()
@@ -271,7 +276,9 @@ func (ns *NetService) Stop() {
 	// stop accepting handler connections
 	if ns.socket != nil {
 		ns.socket.Close()
-		os.Remove(ProtocolSocket)
+		if ns.handlerBind.Network == "unix" {
+			os.Remove(ns.handlerBind.Address)
+		}
 	}
 	// close all active connections
 	for _, c := range ns.connections {

@@ -17,8 +17,6 @@ import (
 	"code.dogecoin.org/governor"
 )
 
-const AllowOrigin = "http://localhost:8000"
-
 func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.GeoIPDatabase) governor.Service {
 	mux := http.NewServeMux()
 	a := &WebAPI{
@@ -123,7 +121,6 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(bytes)))
-		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", "GET, OPTIONS")
 		w.Write(bytes)
 	} else {
@@ -174,7 +171,6 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(res)))
-		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", "POST, OPTIONS")
 		w.Write(res[:])
 	} else {
@@ -185,12 +181,10 @@ func (a *WebAPI) addpeer(w http.ResponseWriter, r *http.Request) {
 func options(w http.ResponseWriter, r *http.Request, options string) {
 	switch r.Method {
 	case http.MethodOptions:
-		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", options)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
-		w.Header().Set("Access-Control-Allow-Origin", AllowOrigin)
 		w.Header().Set("Allow", options)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

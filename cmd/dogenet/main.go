@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -30,17 +32,21 @@ const CoreNodeDefaultPort = 22556
 const DBFile = "dogenet.db"
 const GeoIPFile = "dbip-city-ipv4-num.csv"
 
+var HandlerDefaultBind = spec.BindTo{Network: "unix", Address: "/tmp/dogenet.sock"} // const
+
+var stderr = log.New(os.Stderr, "", 0)
+
 func main() {
 	var crawl int
 	var allowLocal bool
 	binds := []dnet.Address{}
 	bindweb := []dnet.Address{}
+	handlerBind := HandlerDefaultBind
 	public := dnet.Address{}
 	core := dnet.Address{}
 	peers := []spec.NodeInfo{}
 	dbfile := DBFile
 	dir := "./storage"
-	stderr := log.New(os.Stderr, "", 0)
 	flag.Func("dir", "<path> - storage directory (default '.')", func(arg string) error {
 		ent, err := os.Stat(arg)
 		if err != nil {
@@ -69,6 +75,14 @@ func main() {
 			return err
 		}
 		bindweb = append(bindweb, addr)
+		return nil
+	})
+	flag.Func("handler", "Handler listen <ip>:<port> or /unix/path (use [<ip>]:<port> for IPv6)", func(arg string) error {
+		bind, err := parseBindTo(arg, "handler")
+		if err != nil {
+			return err
+		}
+		handlerBind = bind
 		return nil
 	})
 	flag.Func("public", "Set public (router) gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
@@ -173,7 +187,7 @@ func main() {
 
 	// start the gossip server
 	changes := make(chan any, 10)
-	netSvc := netsvc.New(binds, nodeKey, db, allowLocal, changes)
+	netSvc := netsvc.New(binds, handlerBind, nodeKey, db, allowLocal, changes)
 	gov.Add("gossip", netSvc)
 
 	// start the announcement service
@@ -234,6 +248,47 @@ func parseIPPort(arg string, name string, defaultPort uint16) (dnet.Address, err
 		return dnet.Address{}, fmt.Errorf("bad --%v: invalid IP address: %v (use [<ip>]:port for IPv6)", name, arg)
 	}
 	return res, nil
+}
+
+func parseBindTo(arg string, name string) (spec.BindTo, error) {
+	if strings.HasPrefix(arg, "/") {
+		// unix socket path.
+		ent, err := os.Stat(arg)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// not found: ensure parent dir exists.
+				dir := path.Dir(arg)
+				ent, err := os.Stat(dir)
+				if err != nil || !ent.IsDir() {
+					return spec.BindTo{}, fmt.Errorf("bad --%v: directory not found: %v", name, dir)
+				}
+				// valid binding.
+				return spec.BindTo{Network: "unix", Address: arg}, nil
+			}
+			return spec.BindTo{}, fmt.Errorf("bad --%v: %v", name, err)
+		}
+		if !ent.IsDir() {
+			// exists, not a directory.
+			err = os.Remove(arg)
+			if err != nil {
+				return spec.BindTo{}, fmt.Errorf("bad --%v: cannot remove existing file: %v", name, arg)
+			}
+			// valid binding.
+			return spec.BindTo{Network: "unix", Address: arg}, nil
+		} else {
+			return spec.BindTo{}, fmt.Errorf("bad --%v: path is a directory: %v", name, arg)
+		}
+	} else {
+		addr, err := parseIPPort(arg, name, 0)
+		if err != nil {
+			return spec.BindTo{}, fmt.Errorf("bad --%v: %v", name, err)
+		}
+		if addr.Port == 0 {
+			return spec.BindTo{}, fmt.Errorf("bad --%v: must specify a port", name)
+		}
+		// valid binding.
+		return spec.BindTo{Network: "tcp", Address: addr.String()}, nil
+	}
 }
 
 func keysFromEnv() dnet.KeyPair {
