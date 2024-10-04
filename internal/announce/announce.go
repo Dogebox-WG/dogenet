@@ -16,6 +16,8 @@ import (
 const AnnounceLongevity = 5 * time.Minute
 const QueueAnnouncement = 10 * time.Second
 
+var ZeroOwner [32]byte
+
 type Announce struct {
 	governor.ServiceCtx
 	store        spec.Store
@@ -34,9 +36,9 @@ func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver s
 		receiver: receiver,
 		nextAnnounce: node.AddressMsg{
 			// Time is dynamically updated
-			// Owner comes from ChangeOwnerKey message or saved announcement
 			Address: public.Host.To16(),
 			Port:    public.Port,
+			Owner:   ZeroOwner[:], // announce zero-bytes unless we have an owner
 			// Channels: are dynamically updated
 			Services: []node.Service{
 				// XXX this needs to be a config option (public Core Node address)
@@ -105,7 +107,7 @@ func (ns *Announce) Run() {
 
 func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Duration, ok bool) {
 	// load stored channel list to include in our announcement
-	// XXX load stored owner pubkey so IsValid() can return true
+	// XXX load stored owner pubkey so we don't have to wait for Identity handler
 	channels, err := ns.cstore.GetChannels()
 	if err != nil {
 		log.Printf("[announce] cannot load channels: %v", err)

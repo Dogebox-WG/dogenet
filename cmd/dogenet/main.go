@@ -29,6 +29,7 @@ import (
 
 const WebAPIDefaultPort = 8085
 const CoreNodeDefaultPort = 22556
+const DogeNetDefaultPort = dnet.DogeNetDefaultPort
 const DBFile = "dogenet.db"
 const GeoIPFile = "dbip-city-ipv4-num.csv"
 
@@ -62,7 +63,7 @@ func main() {
 	flag.StringVar(&dbfile, "db", DBFile, "path to SQLite database (relative: in storage dir)")
 	flag.BoolVar(&allowLocal, "local", false, "allow local 'public' addresses (for testing)")
 	flag.Func("bind", "Bind gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
-		addr, err := parseIPPort(arg, "bind", dnet.DogeNetDefaultPort)
+		addr, err := parseIPPort(arg, "bind", DogeNetDefaultPort)
 		if err != nil {
 			return err
 		}
@@ -88,7 +89,7 @@ func main() {
 	flag.Func("public", "Set public (router) gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		// use DogeNetDefaultPort by default (rather than the --bind port)
 		// this is typically correct even if bind-port is something different
-		addr, err := parseIPPort(arg, "public", dnet.DogeNetDefaultPort)
+		addr, err := parseIPPort(arg, "public", DogeNetDefaultPort)
 		if err != nil {
 			return err
 		}
@@ -112,7 +113,7 @@ func main() {
 		if err != nil || len(pub) != 32 {
 			return fmt.Errorf("bad --peer: invalid hex pubkey: %v", parts[0])
 		}
-		addr, err := parseIPPort(arg, "peer", dnet.DogeNetDefaultPort)
+		addr, err := parseIPPort(arg, "peer", DogeNetDefaultPort)
 		if err != nil {
 			return err
 		}
@@ -153,7 +154,7 @@ func main() {
 	if len(binds) < 1 {
 		binds = append(binds, dnet.Address{
 			Host: net.IP([]byte{0, 0, 0, 0}),
-			Port: dnet.DogeNetDefaultPort,
+			Port: DogeNetDefaultPort,
 		})
 	}
 	if len(bindweb) < 1 {

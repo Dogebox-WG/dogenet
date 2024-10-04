@@ -19,6 +19,7 @@ import (
 
 const OldestAddrTime = -(30 * 24) * time.Hour // 30 days in the past
 const NewestAddrTime = 5 * time.Minute        // 5 minutes into the future
+const WaitForAnnounceTime = 1 * time.Second   // fast poll (hack)
 
 // Peer connections exchange messages with a remote peer;
 // forward received messages to channel owners,
@@ -73,12 +74,13 @@ func (peer *peerConn) receiveFromPeer(who string) {
 	if peer.isOutbound {
 		// An outbound connection; we send the initial announce message.
 		// 1. MUST announce THIS node's [Node][Addr] on outbound connections.
-		err := peer.sendMyAddress(conn)
+		err := peer.sendMyAddress(conn, who)
 		if err != nil {
 			log.Printf("[%s] failed to send [Node][Addr] to peer: %v", who, err)
 			peer.ns.closePeer(peer)
 			return
 		}
+		log.Printf("[%s] sent first message (outbound)", who)
 		// 2. Wait for the "return announcement" from the peer.
 		msg, err := dnet.ReadMessage(reader)
 		if err != nil {
@@ -86,6 +88,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			peer.ns.closePeer(peer)
 			return
 		}
+		log.Printf("[%s] received first reply (outbound)", who)
 		// 3. MUST be a [Node][Addr] message announcing the peer.
 		if msg.Chan != node.ChannelNode || msg.Tag != node.TagAddress {
 			log.Printf("[%s] expecting [Node][Addr] message but received: [%v][%v]", who, msg.Chan.String(), msg.Tag.String())
@@ -138,6 +141,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			peer.ns.closePeer(peer)
 			return
 		}
+		log.Printf("[%s] received first message (inbound): %v", who, msg)
 		copy(peer.peerPub[:], msg.PubKey)
 		who = fmt.Sprintf("%v/%v", hex.EncodeToString(peer.peerPub[0:6]), peer.addr.String())
 		// 2. Check if we received our own pubkey (connected to self)
@@ -167,12 +171,13 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			return
 		}
 		// 6. Send our [Node][Addr] "return announcement"
-		err = peer.sendMyAddress(conn)
+		err = peer.sendMyAddress(conn, who)
 		if err != nil {
 			log.Printf("[%s] failed to send [Node][Addr] to peer: %v", who, err)
 			peer.ns.closePeer(peer)
 			return
 		}
+		log.Printf("[%s] sent first reply (outbound): %v", who, msg)
 		// 7. OK to start forwaring messages to the peer now.
 		go peer.sendToPeer(who)
 	}
@@ -292,10 +297,18 @@ func (peer *peerConn) sendToPeer(who string) {
 }
 
 // runs on receiveFromPeer
-func (peer *peerConn) sendMyAddress(conn net.Conn) error {
+func (peer *peerConn) sendMyAddress(conn net.Conn, who string) error {
 	// XXX will need to block, unless NetService waits for
 	// an Announce before listening for peers.
-	msg := peer.ns.GetAnnounce()
+	var msg dnet.RawMessage
+	for !peer.ns.Stopping() {
+		msg = peer.ns.GetAnnounce()
+		if len(msg.Header) > 0 {
+			break
+		}
+		log.Printf("[%s] waiting for announcement to send...", who)
+		peer.ns.Sleep(WaitForAnnounceTime)
+	}
 	_, err := conn.Write(msg.Header)
 	if err != nil {
 		return err

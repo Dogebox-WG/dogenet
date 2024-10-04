@@ -11,13 +11,13 @@ dev:
 	KEY=$(shell cat dev-key) IDENT=$(shell cat ident-pub) go run ./cmd/dogenet --local --public 127.0.0.1
 
 dev1:
-	KEY=$(shell cat dev-key1) IDENT=$(shell cat ident-pub1) go run ./cmd/dogenet --db storage/dev1.db --local --public 127.0.0.1:8096 --bind 127.0.0.1:8096 --web 127.0.0.1:8086
+	KEY=$(shell cat dev-key1) IDENT=$(shell cat ident-pub1) go run ./cmd/dogenet --db dev1.db --local --public 127.0.0.1:8196 --bind 127.0.0.1:8196 --web 127.0.0.1:8086
 
 dev2:
-	KEY=$(shell cat dev-key2) IDENT=$(shell cat ident-pub2) go run ./cmd/dogenet --db storage/dev2.db --local --public 127.0.0.1:8097 --bind 127.0.0.1:8097 --web 127.0.0.1:8087
+	KEY=$(shell cat dev-key2) IDENT=$(shell cat ident-pub2) go run ./cmd/dogenet --db dev2.db --local --public 127.0.0.1:8097 --bind 127.0.0.1:8097 --web 127.0.0.1:8087
 
 dev3:
-	KEY=$(shell cat dev-key3) IDENT=$(shell cat ident-pub3) go run ./cmd/dogenet --db storage/dev3.db --local --public 127.0.0.1:8098 --bind 127.0.0.1:8098 --web 127.0.0.1:8088
+	KEY=$(shell cat dev-key3) IDENT=$(shell cat ident-pub3) go run ./cmd/dogenet --db dev3.db --local --public 127.0.0.1:8098 --bind 127.0.0.1:8098 --web 127.0.0.1:8088
 
 key:
 	go run ./cmd/dogenet genkey
