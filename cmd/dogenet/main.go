@@ -215,7 +215,7 @@ func main() {
 
 	// start the web server.
 	for _, bind := range bindweb {
-		gov.Add("web-api", web.New(bind, db, netSvc, geoIP))
+		gov.Add("web-api", web.New(bind, db, netSvc, geoIP, nodeKey.Pub[:], public))
 	}
 
 	// start the store trimmer

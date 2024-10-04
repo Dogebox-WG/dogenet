@@ -17,7 +17,7 @@ import (
 	"code.dogecoin.org/governor"
 )
 
-func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.GeoIPDatabase) governor.Service {
+func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.GeoIPDatabase, pubKey []byte, pubAddr spec.Address) governor.Service {
 	mux := http.NewServeMux()
 	a := &WebAPI{
 		store: store,
@@ -25,8 +25,10 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.G
 			Addr:    bind.String(),
 			Handler: mux,
 		},
-		netSvc: netSvc,
-		geoIP:  geoIP,
+		netSvc:  netSvc,
+		geoIP:   geoIP,
+		pubKey:  pubKey,
+		pubAddr: pubAddr,
 	}
 	mux.HandleFunc("/nodes", a.getNodes)
 	mux.HandleFunc("/addpeer", a.addpeer)
@@ -36,11 +38,13 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.G
 
 type WebAPI struct {
 	governor.ServiceCtx
-	store  spec.Store
-	cstore spec.StoreCtx
-	srv    http.Server
-	netSvc spec.NetSvc
-	geoIP  *geoip.GeoIPDatabase
+	store   spec.Store
+	cstore  spec.StoreCtx
+	srv     http.Server
+	netSvc  spec.NetSvc
+	geoIP   *geoip.GeoIPDatabase
+	pubKey  []byte
+	pubAddr spec.Address
 }
 
 // called on any
@@ -80,22 +84,40 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// dogemap expects a flat array with latitude and longitude
-		var nodes []MapNode
+		// add this node's address to the result
+		nodeMap := make(map[string]MapNode)
+		pubAddr := a.pubAddr.String()
+		addr, _ := dnet.ParseAddress(pubAddr)
+		lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
+		nodeMap[pubAddr] = MapNode{
+			SubVer:  pubAddr,
+			Lat:     lat,
+			Lon:     lon,
+			Country: country,
+			City:    city,
+			IPInfo:  nil,
+		}
 		for _, core := range list.Core {
 			addr, err := dnet.ParseAddress(core.Address)
 			if err != nil {
 				log.Printf("[GET /nodes] invalid core address: %v", core.Address)
 				continue
 			}
+			// normalize to IPv4 if possible
+			ipv4 := addr.Host.To4()
+			if ipv4 != nil {
+				addr.Host = ipv4
+			}
 			lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
-			nodes = append(nodes, MapNode{
-				SubVer:  core.Address,
+			key := addr.String() // normalized address
+			nodeMap[key] = MapNode{
+				SubVer:  key,
 				Lat:     lat,
 				Lon:     lon,
 				Country: country,
 				City:    city,
 				IPInfo:  nil,
-			})
+			}
 		}
 		for _, net := range list.Net {
 			addr, err := dnet.ParseAddress(net.Address)
@@ -103,15 +125,27 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[GET /nodes] invalid core address: %v", net.Address)
 				continue
 			}
+			// normalize to IPv4 if possible
+			ipv4 := addr.Host.To4()
+			if ipv4 != nil {
+				addr.Host = ipv4
+			}
 			lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
-			nodes = append(nodes, MapNode{
+			key := addr.String() // normalized address
+			nodeMap[key] = MapNode{
 				SubVer:  net.Address,
 				Lat:     lat,
 				Lon:     lon,
 				Country: country,
 				City:    city,
 				IPInfo:  nil,
-			})
+			}
+		}
+
+		// values from the map
+		nodes := make([]MapNode, 0, len(nodeMap))
+		for _, node := range nodeMap {
+			nodes = append(nodes, node)
 		}
 
 		bytes, err := json.Marshal(nodes)
