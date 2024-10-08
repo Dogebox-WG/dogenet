@@ -15,12 +15,10 @@ const SecondsPerDay = 24 * 60 * 60
 const MaxCoreNodeDays = 3
 
 // Store is the top-level interface (e.g. SQLiteStore)
+// It is bound to a cancellable Context.
 type Store interface {
-	WithCtx(ctx context.Context) StoreCtx
-}
-
-// StoreCtx is a Store bound to a cancellable Context
-type StoreCtx interface {
+	WithCtx(ctx context.Context) Store
+	// common
 	CoreStats() (mapSize int, newNodes int, err error)
 	NetStats() (mapSize int, err error)
 	NodeList() (res NodeListRes, err error)

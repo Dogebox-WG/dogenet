@@ -24,14 +24,14 @@ const MinimumBlockHeight = 700000
 const DogeMapServices = 0
 
 func New(store spec.Store, fromAddr spec.Address, maxTime time.Duration, isLocal bool) *Collector {
-	c := &Collector{store: store, Address: fromAddr, maxTime: maxTime, isLocal: isLocal}
+	c := &Collector{_store: store, Address: fromAddr, maxTime: maxTime, isLocal: isLocal}
 	return c
 }
 
 type Collector struct {
 	governor.ServiceCtx
+	_store  spec.Store
 	store   spec.Store
-	cstore  spec.StoreCtx
 	mutex   sync.Mutex
 	conn    net.Conn
 	Address spec.Address
@@ -54,12 +54,12 @@ func (c *Collector) Stop() {
 func (c *Collector) Run() {
 	who := c.Address.String()
 	for {
-		c.cstore = c.store.WithCtx(c.Context) // Service Context is first available here
+		c.store = c._store.WithCtx(c.Context) // Service Context is first available here
 		// choose the next node to connect to
 		remoteNode := c.Address
 		for !remoteNode.IsValid() {
 			var err error
-			remoteNode, err = c.cstore.ChooseCoreNode()
+			remoteNode, err = c.store.ChooseCoreNode()
 			if err != nil {
 				log.Printf("[%s] ChooseCoreNode: %v", who, err)
 			} else if remoteNode.IsValid() {
@@ -131,7 +131,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 
 	// successful connection: update the node's timestamp.
 	if !c.isLocal {
-		c.cstore.UpdateCoreTime(nodeAddr)
+		c.store.UpdateCoreTime(nodeAddr)
 	}
 
 	addresses := 0
@@ -158,7 +158,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 
 		case "addr":
 			addr := msg.DecodeAddrMsg(payload, nodeVer)
-			_, oldLen, err := c.cstore.CoreStats()
+			_, oldLen, err := c.store.CoreStats()
 			if err != nil {
 				fmt.Printf("[%s] CoreStats: %v\n", who, err)
 				break
@@ -177,7 +177,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 					kept++
 				}
 			}
-			dbSize, newLen, err := c.cstore.CoreStats()
+			dbSize, newLen, err := c.store.CoreStats()
 			if err != nil {
 				fmt.Printf("[%s] CoreStats: %v\n", who, err)
 				break

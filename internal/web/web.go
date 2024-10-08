@@ -20,7 +20,7 @@ import (
 func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.GeoIPDatabase, pubKey []byte, pubAddr spec.Address) governor.Service {
 	mux := http.NewServeMux()
 	a := &WebAPI{
-		store: store,
+		_store: store,
 		srv: http.Server{
 			Addr:    bind.String(),
 			Handler: mux,
@@ -38,8 +38,8 @@ func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc, geoIP *geoip.G
 
 type WebAPI struct {
 	governor.ServiceCtx
+	_store  spec.Store
 	store   spec.Store
-	cstore  spec.StoreCtx
 	srv     http.Server
 	netSvc  spec.NetSvc
 	geoIP   *geoip.GeoIPDatabase
@@ -60,7 +60,7 @@ func (a *WebAPI) Stop() {
 
 // goroutine
 func (a *WebAPI) Run() {
-	a.cstore = a.store.WithCtx(a.Context) // Service Context is first available here
+	a.store = a._store.WithCtx(a.Context) // Service Context is first available here
 	log.Printf("HTTP server listening on: %v\n", a.srv.Addr)
 	if err := a.srv.ListenAndServe(); err != http.ErrServerClosed { // blocking call
 		log.Printf("HTTP server: %v\n", err)
@@ -78,7 +78,7 @@ type MapNode struct {
 
 func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		list, err := a.cstore.NodeList()
+		list, err := a.store.NodeList()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error in query: %s", err.Error()), http.StatusInternalServerError)
 			return

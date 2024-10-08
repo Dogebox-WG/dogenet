@@ -29,8 +29,8 @@ type NetService struct {
 	bindAddrs       []spec.Address // bind-to address on THIS node
 	handlerBind     spec.BindTo
 	allowLocal      bool // allow local IP address in Announcement messages (for local testing)
+	_store          spec.Store
 	store           spec.Store
-	cstore          spec.StoreCtx
 	nodeKey         dnet.KeyPair
 	newPeers        chan spec.NodeInfo
 	announceChanges chan any // send spec.Change* to Announce service
@@ -54,7 +54,7 @@ func New(bind []spec.Address, handlerBind spec.BindTo, nodeKey dnet.KeyPair, sto
 		bindAddrs:       bind,
 		handlerBind:     handlerBind,
 		allowLocal:      allowLocal,
-		store:           store,
+		_store:          store,
 		nodeKey:         nodeKey,
 		lockedPeers:     make(map[MapPubKey]time.Time),
 		connectedPeers:  make(map[MapPubKey]*peerConn),
@@ -65,7 +65,7 @@ func New(bind []spec.Address, handlerBind spec.BindTo, nodeKey dnet.KeyPair, sto
 
 // goroutine
 func (ns *NetService) Run() {
-	ns.cstore = ns.store.WithCtx(ns.Context) // Service Context is first available here
+	ns.store = ns._store.WithCtx(ns.Context) // Service Context is first available here
 	var wg sync.WaitGroup
 	ns.startListeners(&wg)
 	go ns.acceptHandlers()
@@ -191,7 +191,7 @@ func (ns *NetService) gossipRandomAddresses() {
 		time.Sleep(GossipAddressInverval + time.Duration(rand.Intn(GossipAddressRandom))*time.Second)
 
 		// choose a random node address
-		nm, err := ns.cstore.ChooseNetNodeMsg()
+		nm, err := ns.store.ChooseNetNodeMsg()
 		if err != nil {
 			if !spec.IsNotFoundError(err) {
 				log.Printf("[Node]: %v", err)
@@ -244,7 +244,7 @@ func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 		default:
 			if ns.countPeers() < IdealPeers {
 				ns.Sleep(time.Second) // avoid spinning
-				np, err := ns.cstore.ChooseNetNode()
+				np, err := ns.store.ChooseNetNode()
 				if err != nil {
 					if !spec.IsNotFoundError(err) {
 						log.Printf("[%s] ChooseNetNode: %v", who, err)

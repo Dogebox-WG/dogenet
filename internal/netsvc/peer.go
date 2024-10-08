@@ -28,7 +28,7 @@ const WaitForAnnounceTime = 1 * time.Second   // fast poll (hack)
 type peerConn struct {
 	ns         *NetService
 	conn       net.Conn
-	store      spec.StoreCtx
+	store      spec.Store
 	allowLocal bool
 	isOutbound bool
 	hasPub     bool // has a peer pubkey
@@ -44,7 +44,7 @@ func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, 
 	peer := &peerConn{
 		ns:         ns,
 		conn:       conn,
-		store:      ns.cstore,
+		store:      ns.store,
 		allowLocal: ns.allowLocal, // allow local IP address in Announcement messages (for local testing)
 		isOutbound: outbound,
 		hasPub:     hasPub,

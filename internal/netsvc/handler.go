@@ -50,7 +50,7 @@ func (hand *handlerConn) receiveFromHandler() {
 	atomic.StoreUint32(&hand.channel, uint32(bind.Chan))
 	log.Printf("[%s] handler bound to channel: [%v]", hand.name, bind.Chan)
 	// add the channel in the database (or update time)
-	store := hand.ns.cstore
+	store := hand.ns.store
 	err = store.AddChannel(bind.Chan)
 	if err != nil {
 		log.Println(err.Error())

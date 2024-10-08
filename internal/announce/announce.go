@@ -20,8 +20,8 @@ var ZeroOwner [32]byte
 
 type Announce struct {
 	governor.ServiceCtx
+	_store       spec.Store
 	store        spec.Store
-	cstore       spec.StoreCtx
 	nodeKey      dnet.KeyPair          // node keypair for signing address messages
 	changes      chan any              // input: changes to public address, owner pubkey, channels we have handlers for.
 	receiver     spec.AnnounceReceiver // output: AnnounceReceiver receives new announcement RawMessages
@@ -30,7 +30,7 @@ type Announce struct {
 
 func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver spec.AnnounceReceiver, changes chan any) *Announce {
 	return &Announce{
-		store:    store,
+		_store:   store,
 		nodeKey:  nodeKey,
 		changes:  changes,
 		receiver: receiver,
@@ -50,7 +50,7 @@ func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver s
 
 // goroutine
 func (ns *Announce) Run() {
-	ns.cstore = ns.store.WithCtx(ns.Context) // Service Context is first available here
+	ns.store = ns._store.WithCtx(ns.Context) // Service Context is first available here
 	msg, remain, ok := ns.loadOrGenerateAnnounce()
 	if ok {
 		ns.receiver.ReceiveAnnounce(msg)
@@ -69,7 +69,8 @@ func (ns *Announce) Run() {
 				ns.nextAnnounce.Owner = msg.Key[:]
 				log.Printf("[announce] received new owner key: %v", hex.EncodeToString(msg.Key[:]))
 			case spec.ChangeChannel:
-				channels, err := ns.cstore.GetChannels()
+				// query all currently-active channels.
+				channels, err := ns.store.GetChannels()
 				if err != nil {
 					log.Printf("[announce] %v", err)
 				} else {
@@ -108,7 +109,7 @@ func (ns *Announce) Run() {
 func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Duration, ok bool) {
 	// load stored channel list to include in our announcement
 	// XXX load stored owner pubkey so we don't have to wait for Identity handler
-	channels, err := ns.cstore.GetChannels()
+	channels, err := ns.store.GetChannels()
 	if err != nil {
 		log.Printf("[announce] cannot load channels: %v", err)
 		return dnet.RawMessage{}, AnnounceLongevity, false
@@ -118,7 +119,7 @@ func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Dura
 		return dnet.RawMessage{}, AnnounceLongevity, false
 	}
 	// load the stored announcement from the database
-	oldPayload, sig, expires, err := ns.cstore.GetAnnounce()
+	oldPayload, sig, expires, owner, err := ns.store.GetAnnounce()
 	if err != nil {
 		log.Printf("[announce] cannot load announcement: %v", err)
 		return ns.generateAnnounce(ns.nextAnnounce)
@@ -151,7 +152,7 @@ func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (raw dnet.RawMessag
 	payload := newMsg.Encode()
 	msg := dnet.EncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey, payload)
 	view := dnet.MsgView(msg)
-	err := ns.cstore.SetAnnounce(payload, view.Signature()[:], now.Add(AnnounceLongevity).Unix())
+	err := ns.store.SetAnnounce(payload, view.Signature()[:], now.Add(AnnounceLongevity).Unix())
 	if err != nil {
 		log.Printf("[announce] cannot store announcement: %v", err)
 	}
