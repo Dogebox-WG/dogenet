@@ -428,7 +428,7 @@ func (s SQLiteStoreCtx) UpdateCoreTime(address Address) (err error) {
 	return s.doTxn("UpdateCoreTime", func(tx *sql.Tx) error {
 		addrKey := address.ToBytes()
 		unixTimeSec := time.Now().Unix()
-		_, err := tx.Exec("UPDATE core SET time=?, dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE address=?", unixTimeSec, addrKey)
+		_, err := tx.Exec("UPDATE core SET time=?, dayc=?+(SELECT dayc FROM config LIMIT 1) WHERE address=?", unixTimeSec, spec.MaxCoreNodeDays, addrKey)
 		if err != nil {
 			return fmt.Errorf("update: %v", err)
 		}
