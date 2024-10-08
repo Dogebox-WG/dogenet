@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"log"
+	"slices"
 	"time"
 
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -12,8 +13,7 @@ import (
 	"code.dogecoin.org/governor"
 )
 
-// const AnnounceLongevity = 24 * time.Hour
-const AnnounceLongevity = 5 * time.Minute
+const AnnounceLongevity = 24 * time.Hour
 const QueueAnnouncement = 10 * time.Second
 
 var ZeroOwner [32]byte
@@ -66,16 +66,43 @@ func (ns *Announce) Run() {
 				ns.nextAnnounce.Port = msg.Addr.Port
 				log.Printf("[announce] received new public address: %v", msg.Addr)
 			case spec.ChangeOwnerKey:
+				newOwner := msg.Key[:]
+				if bytes.Equal(ns.nextAnnounce.Owner, newOwner) {
+					// ignore the message.
+					// this avoids signing a new announcement early.
+					continue
+				}
 				ns.nextAnnounce.Owner = msg.Key[:]
-				log.Printf("[announce] received new owner key: %v", hex.EncodeToString(msg.Key[:]))
+				log.Printf("[announce] received new owner: %v", hex.EncodeToString(msg.Key[:]))
+				err := ns.store.SetAnnounceOwner(msg.Key[:])
+				if err != nil {
+					log.Printf("[announce] cannot store announcement owner: %v", err)
+				}
 			case spec.ChangeChannel:
 				// query all currently-active channels.
 				channels, err := ns.store.GetChannels()
 				if err != nil {
 					log.Printf("[announce] %v", err)
-				} else {
-					ns.nextAnnounce.Channels = channels
+					continue
 				}
+				// check if channels are unchanged.
+				// this avoids signing a new announcement early.
+				current := ns.nextAnnounce.Channels
+				if len(channels) == len(current) {
+					slices.Sort(channels) // sort database result
+					different := false
+					for i, ch := range channels {
+						if ch != current[i] {
+							different = true
+							break
+						}
+					}
+					if !different {
+						// ignore the message.
+						continue
+					}
+				}
+				ns.nextAnnounce.Channels = channels
 				log.Printf("[announce] received new channels: %v", channels)
 			default:
 				log.Printf("[announce] invalid change message received")
@@ -114,15 +141,19 @@ func (ns *Announce) loadOrGenerateAnnounce() (raw dnet.RawMessage, rem time.Dura
 		log.Printf("[announce] cannot load channels: %v", err)
 		return dnet.RawMessage{}, AnnounceLongevity, false
 	}
+	slices.Sort(channels)               // sort database result
 	ns.nextAnnounce.Channels = channels // initial set of channels
-	if !ns.nextAnnounce.IsValid() {
-		return dnet.RawMessage{}, AnnounceLongevity, false
-	}
 	// load the stored announcement from the database
 	oldPayload, sig, expires, owner, err := ns.store.GetAnnounce()
 	if err != nil {
 		log.Printf("[announce] cannot load announcement: %v", err)
 		return ns.generateAnnounce(ns.nextAnnounce)
+	}
+	if len(owner) == 32 {
+		ns.nextAnnounce.Owner = owner // initial owner
+	}
+	if !ns.nextAnnounce.IsValid() {
+		return dnet.RawMessage{}, AnnounceLongevity, false
 	}
 	now := time.Now().Unix()
 	if len(oldPayload) >= node.AddrMsgMinSize && len(sig) == 64 && now < expires {

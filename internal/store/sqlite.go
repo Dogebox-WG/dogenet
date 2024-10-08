@@ -456,10 +456,10 @@ func (s SQLiteStore) ChooseCoreNode() (res Address, err error) {
 	return
 }
 
-func (s SQLiteStore) GetAnnounce() (payload []byte, sig []byte, time int64, err error) {
+func (s SQLiteStore) GetAnnounce() (payload []byte, sig []byte, time int64, owner []byte, err error) {
 	err = s.doTxn("GetAnnounce", func(tx *sql.Tx) error {
-		row := tx.QueryRow("SELECT payload, sig, time FROM announce LIMIT 1")
-		e := row.Scan(&payload, &sig, &time)
+		row := tx.QueryRow("SELECT payload,sig,time,owner FROM announce LIMIT 1")
+		e := row.Scan(&payload, &sig, &time, &owner)
 		if e != nil {
 			if !errors.Is(e, sql.ErrNoRows) {
 				return fmt.Errorf("query: %v", e)
@@ -481,7 +481,24 @@ func (s SQLiteStore) SetAnnounce(payload []byte, sig []byte, time int64) error {
 			return err
 		}
 		if num == 0 {
-			_, err = tx.Exec("INSERT INTO announce (payload,sig,time) VALUES (?,?,?)", payload, sig, time)
+			_, err = tx.Exec("INSERT INTO announce (payload,sig,time,owner) VALUES (?,?,?)", payload, sig, time)
+		}
+		return err
+	})
+}
+
+func (s SQLiteStore) SetAnnounceOwner(owner []byte) error {
+	return s.doTxn("SetAnnounceOwner", func(tx *sql.Tx) error {
+		res, err := tx.Exec("UPDATE announce SET owner=?", owner)
+		if err != nil {
+			return err
+		}
+		num, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if num == 0 {
+			_, err = tx.Exec("INSERT INTO announce (payload,sig,time,owner) VALUES (?,?,?,?)", []byte{}, []byte{}, 0, owner)
 		}
 		return err
 	})

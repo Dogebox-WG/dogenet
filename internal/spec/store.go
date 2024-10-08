@@ -28,8 +28,9 @@ type Store interface {
 	UpdateCoreTime(address Address) error
 	ChooseCoreNode() (Address, error)
 	// dogenet nodes
-	GetAnnounce() (payload []byte, sig []byte, time int64, err error)
+	GetAnnounce() (payload []byte, sig []byte, time int64, owner []byte, err error)
 	SetAnnounce(payload []byte, sig []byte, time int64) error
+	SetAnnounceOwner(owner []byte) error
 	AddNetNode(key []byte, address Address, time int64, owner []byte, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error)
 	UpdateNetTime(key []byte) error
 	ChooseNetNode() (NodeInfo, error)
