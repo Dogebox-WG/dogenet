@@ -20,8 +20,6 @@ import (
 type NodeID = spec.NodeID
 type Address = spec.Address
 
-const SecondsPerDay = 24 * 60 * 60
-
 // SELECT * FROM table WHERE id IN (SELECT id FROM table ORDER BY RANDOM() LIMIT 10)
 
 type SQLiteStore struct {
@@ -138,7 +136,7 @@ func (s *SQLiteStore) WithCtx(ctx context.Context) spec.StoreCtx {
 
 // The number of whole days since the unix epoch.
 func unixDayStamp() int64 {
-	return time.Now().Unix() / SecondsPerDay
+	return time.Now().Unix() / spec.SecondsPerDay
 }
 
 func IsConflict(err error) bool {
@@ -163,7 +161,7 @@ func (s SQLiteStoreCtx) doTxn(name string, work func(tx *sql.Tx) error) error {
 					continue
 				}
 			}
-			return fmt.Errorf("[Store] cannot begin transaction: %v", err)
+			return dbErr(err, "cannot begin transaction: "+name)
 		}
 		defer tx.Rollback()
 		err = work(tx)
@@ -175,7 +173,7 @@ func (s SQLiteStoreCtx) doTxn(name string, work func(tx *sql.Tx) error) error {
 					continue
 				}
 			}
-			return fmt.Errorf("[Store] %v: %v", name, err)
+			return err
 		}
 		err = tx.Commit()
 		if err != nil {
@@ -186,7 +184,7 @@ func (s SQLiteStoreCtx) doTxn(name string, work func(tx *sql.Tx) error) error {
 					continue
 				}
 			}
-			return fmt.Errorf("[Store] cannot commit %v: %v", name, err)
+			return dbErr(err, "cannot commit: "+name)
 		}
 		return nil
 	}
@@ -404,10 +402,10 @@ func (s SQLiteStoreCtx) TrimNodes() (advanced bool, remCore int64, remNode int64
 	return
 }
 
-func (s SQLiteStoreCtx) AddCoreNode(address Address, unixTimeSec int64, services uint64) error {
+func (s SQLiteStoreCtx) AddCoreNode(address Address, unixTimeSec int64, remainDays int64, services uint64) error {
 	return s.doTxn("AddCoreNode", func(tx *sql.Tx) error {
 		addrKey := address.ToBytes()
-		res, err := tx.Exec("UPDATE core SET time=?, services=?, dayc=30+(SELECT dayc FROM config LIMIT 1) WHERE address=?", unixTimeSec, services, addrKey)
+		res, err := tx.Exec("UPDATE core SET time=?, services=?, dayc=MAX(dayc,?+(SELECT dayc FROM config LIMIT 1)) WHERE address=?", unixTimeSec, services, remainDays, addrKey)
 		if err != nil {
 			return fmt.Errorf("update: %v", err)
 		}
@@ -416,8 +414,8 @@ func (s SQLiteStoreCtx) AddCoreNode(address Address, unixTimeSec int64, services
 			return fmt.Errorf("rows-affected: %v", err)
 		}
 		if num == 0 {
-			_, e := tx.Exec("INSERT INTO core (address, time, services, isnew, dayc) VALUES (?1,?2,?3,true,30+(SELECT dayc FROM config LIMIT 1))",
-				addrKey, unixTimeSec, services)
+			_, e := tx.Exec("INSERT INTO core (address, time, services, isnew, dayc) VALUES (?1,?2,?3,true,?+(SELECT dayc FROM config LIMIT 1))",
+				addrKey, unixTimeSec, services, remainDays)
 			if e != nil {
 				return fmt.Errorf("insert: %v", e)
 			}

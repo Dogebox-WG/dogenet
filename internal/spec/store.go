@@ -3,13 +3,16 @@ package spec
 import (
 	"context"
 	"net"
-	"time"
 
 	"code.dogecoin.org/gossip/dnet"
 )
 
-// Keep nodes in the map for 2 days before expiry
-const ExpiryTime = time.Duration(2 * 24 * time.Hour)
+const SecondsPerDay = 24 * 60 * 60
+
+// Keep core nodes for 3 midnights before expiry.
+// Just before midnight -> 2 days.
+// Just after midnight -> 3 days.
+const MaxCoreNodeDays = 3
 
 // Store is the top-level interface (e.g. SQLiteStore)
 type Store interface {
@@ -23,7 +26,7 @@ type StoreCtx interface {
 	NodeList() (res NodeListRes, err error)
 	TrimNodes() (advanced bool, remCore int64, remNode int64, err error)
 	// core nodes
-	AddCoreNode(address Address, time int64, services uint64) error
+	AddCoreNode(address Address, time int64, remainDays int64, services uint64) error
 	UpdateCoreTime(address Address) error
 	ChooseCoreNode() (Address, error)
 	// dogenet nodes
