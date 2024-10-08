@@ -80,12 +80,12 @@ func (c *Collector) Run() {
 
 func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 	who := nodeAddr.String()
-	fmt.Printf("[%s] Connecting to node: %s\n", who, nodeAddr)
+	//fmt.Printf("[%s] Connecting to node: %s\n", who, nodeAddr)
 
 	d := net.Dialer{Timeout: 30 * time.Second}
 	conn, err := d.DialContext(c.Context, "tcp", nodeAddr.String())
 	if err != nil {
-		fmt.Printf("[%s] Error connecting to Dogecoin node: %v\n", who, err)
+		fmt.Printf("[%s] Error connecting to Core node [%v]: %v\n", who, nodeAddr, err)
 		return
 	}
 	defer conn.Close()
@@ -107,7 +107,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 		return
 	}
 
-	fmt.Printf("[%s] Sent 'version' message\n", who)
+	//fmt.Printf("[%s] Sent 'version' message\n", who)
 
 	// expect the version message from the node
 	version, err := expectVersion(reader)
@@ -116,7 +116,7 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 		return
 	}
 
-	fmt.Printf("[%s] Received 'version': %v\n", who, version)
+	//fmt.Printf("[%s] Received 'version': %v\n", who, version)
 
 	nodeVer := version.Version // other node's version
 	if nodeVer >= 209 {
@@ -126,19 +126,12 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 			fmt.Printf("[%s] failed to send 'verack': %v\n", who, err)
 			return
 		}
-		fmt.Printf("[%s] Sent 'verack'\n", who)
+		//fmt.Printf("[%s] Sent 'verack'\n", who)
 	}
 
 	// successful connection: update the node's timestamp.
 	if !c.isLocal {
 		c.cstore.UpdateCoreTime(nodeAddr)
-	}
-
-	dbSize, newLen, err := c.cstore.CoreStats()
-	if err != nil {
-		fmt.Printf("[%s] CoreStats: %v\n", who, err)
-	} else {
-		fmt.Printf("[%s] %d in DB, %d new\n", who, dbSize, newLen)
 	}
 
 	addresses := 0
@@ -152,12 +145,12 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 
 		switch cmd {
 		case "ping":
-			fmt.Printf("[%s] Ping received.\n", who)
+			//fmt.Printf("[%s] Ping received.\n", who)
 			sendPong(conn, payload, who) // keep-alive
 
 			// request a list of known addresses (seed nodes)
 			sendGetAddr(conn, who)
-			fmt.Printf("[%s] Sent getaddr.\n", who)
+			//fmt.Printf("[%s] Sent getaddr.\n", who)
 
 		case "reject":
 			re := msg.DecodeReject(payload)
@@ -196,14 +189,14 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 				if wait < 1 {
 					wait = 1
 				}
-				fmt.Printf("[%s] Sleeping for %v\n", who, wait)
+				//fmt.Printf("[%s] Sleeping for %v\n", who, wait)
 				c.Sleep(time.Duration(wait) * time.Second)
 				return
 			}
 
 		default:
 			//fmt.Printf("Command '%s' payload: %s\n", cmd, hex.EncodeToString(payload))
-			fmt.Printf("[%s] Received: %v\n", who, cmd)
+			//fmt.Printf("[%s] Received: %v\n", who, cmd)
 		}
 	}
 }

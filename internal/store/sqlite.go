@@ -200,6 +200,9 @@ func (s SQLiteStoreCtx) Sleep(dur time.Duration) {
 }
 
 func dbErr(err error, where string) error {
+	if errors.Is(err, spec.NotFoundError) {
+		return err
+	}
 	if sqErr, isSq := err.(sqlite3.Error); isSq {
 		if sqErr.Code == sqlite3.ErrConstraint {
 			// MUST detect 'AlreadyExists' to fulfil the API contract!

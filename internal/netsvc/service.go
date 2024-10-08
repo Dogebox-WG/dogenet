@@ -193,9 +193,7 @@ func (ns *NetService) gossipRandomAddresses() {
 		// choose a random node address
 		nm, err := ns.cstore.ChooseNetNodeMsg()
 		if err != nil {
-			if spec.IsNotFoundError(err) {
-				log.Printf("[Node]: no addresses to gossip")
-			} else {
+			if !spec.IsNotFoundError(err) {
 				log.Printf("[Node]: %v", err)
 			}
 			continue
@@ -248,7 +246,9 @@ func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 				ns.Sleep(time.Second) // avoid spinning
 				np, err := ns.cstore.ChooseNetNode()
 				if err != nil {
-					log.Printf("[%s] ChooseNetNode: %v", who, err)
+					if !spec.IsNotFoundError(err) {
+						log.Printf("[%s] ChooseNetNode: %v", who, err)
+					}
 				} else {
 					return np
 				}

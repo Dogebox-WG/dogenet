@@ -141,7 +141,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			peer.ns.closePeer(peer)
 			return
 		}
-		log.Printf("[%s] received first message (inbound): %v", who, msg)
+		log.Printf("[%s] received first message (inbound): %v", who, msg.Tag)
 		copy(peer.peerPub[:], msg.PubKey)
 		who = fmt.Sprintf("%v/%v", hex.EncodeToString(peer.peerPub[0:6]), peer.addr.String())
 		// 2. Check if we received our own pubkey (connected to self)
@@ -177,7 +177,7 @@ func (peer *peerConn) receiveFromPeer(who string) {
 			peer.ns.closePeer(peer)
 			return
 		}
-		log.Printf("[%s] sent first reply (outbound): %v", who, msg)
+		log.Printf("[%s] sent first reply (outbound): %v", who, msg.Tag)
 		// 7. OK to start forwaring messages to the peer now.
 		go peer.sendToPeer(who)
 	}
