@@ -68,12 +68,13 @@ func (a *WebAPI) Run() {
 }
 
 type MapNode struct {
-	SubVer  string  `json:"subver"`
-	Lat     string  `json:"lat"`
-	Lon     string  `json:"lon"`
-	City    string  `json:"city"`
-	Country string  `json:"country"`
-	IPInfo  *string `json:"ipinfo"` // can encode null
+	SubVer   string  `json:"subver"` // IP address
+	Lat      string  `json:"lat"`
+	Lon      string  `json:"lon"`
+	City     string  `json:"city"`
+	Country  string  `json:"country"`
+	IPInfo   *string `json:"ipinfo"` // can encode null
+	Identity string  `json:"identity"`
 }
 
 func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
@@ -90,12 +91,13 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 		addr, _ := dnet.ParseAddress(pubAddr)
 		lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
 		nodeMap[pubAddr] = MapNode{
-			SubVer:  pubAddr,
-			Lat:     lat,
-			Lon:     lon,
-			Country: country,
-			City:    city,
-			IPInfo:  nil,
+			SubVer:   pubAddr,
+			Lat:      lat,
+			Lon:      lon,
+			Country:  country,
+			City:     city,
+			IPInfo:   nil,
+			Identity: hex.EncodeToString(a.pubKey),
 		}
 		for _, core := range list.Core {
 			addr, err := dnet.ParseAddress(core.Address)
@@ -133,12 +135,13 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 			lat, lon, country, city := a.geoIP.FindLocation(addr.Host)
 			key := addr.String() // normalized address
 			nodeMap[key] = MapNode{
-				SubVer:  net.Address,
-				Lat:     lat,
-				Lon:     lon,
-				Country: country,
-				City:    city,
-				IPInfo:  nil,
+				SubVer:   net.Address,
+				Lat:      lat,
+				Lon:      lon,
+				Country:  country,
+				City:     city,
+				IPInfo:   nil,
+				Identity: net.Identity,
 			}
 		}
 
