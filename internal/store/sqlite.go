@@ -413,18 +413,8 @@ func (s SQLiteStore) TrimNodes() (advanced bool, remCore int64, remNode int64, e
 				return fmt.Errorf("TrimNodes: UPDATE config: %v", err)
 			}
 
-			// expire core nodes
-			res, err := tx.Exec("DELETE FROM core WHERE dayc < ?", dayc)
-			if err != nil {
-				return fmt.Errorf("TrimNodes: DELETE core: %v", err)
-			}
-			remCore, err = res.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("TrimNodes: rows-affected: %v", err)
-			}
-
 			// expire net nodes
-			res, err = tx.Exec("DELETE FROM node WHERE dayc < ?", dayc)
+			res, err := tx.Exec("DELETE FROM node WHERE dayc < ?", dayc)
 			if err != nil {
 				return fmt.Errorf("TrimNodes: DELETE node: %v", err)
 			}
@@ -443,15 +433,28 @@ func (s SQLiteStore) TrimNodes() (advanced bool, remCore int64, remNode int64, e
 				return fmt.Errorf("TrimNodes: rows-affected: %v", err)
 			}
 		}
+		// expire core nodes,
+		// which don't use the day-count policy
+		// because a +/- 1 day tolerance is too much
+		unixTimeSec := time.Now().Unix()
+		expireBefore := unixTimeSec - spec.MaxCoreNodeDays*spec.SecondsPerDay
+		res, err := tx.Exec("DELETE FROM core WHERE time < ?", expireBefore)
+		if err != nil {
+			return fmt.Errorf("TrimNodes: DELETE core: %v", err)
+		}
+		remCore, err = res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("TrimNodes: rows-affected: %v", err)
+		}
 		return nil
 	})
 	return
 }
 
-func (s SQLiteStore) AddCoreNode(address Address, unixTimeSec int64, remainDays int64, services uint64) error {
+func (s SQLiteStore) AddCoreNode(address Address, unixTimeSec int64, services uint64) error {
 	return s.doTxn("AddCoreNode", func(tx *sql.Tx) error {
 		addrKey := address.ToBytes()
-		res, err := tx.Exec("UPDATE core SET time=?, services=?, dayc=MAX(dayc,?+(SELECT dayc FROM config LIMIT 1)) WHERE address=?", unixTimeSec, services, remainDays, addrKey)
+		res, err := tx.Exec("UPDATE core SET time=?, services=? WHERE address=?", unixTimeSec, services, addrKey)
 		if err != nil {
 			return fmt.Errorf("update: %v", err)
 		}
@@ -460,8 +463,8 @@ func (s SQLiteStore) AddCoreNode(address Address, unixTimeSec int64, remainDays 
 			return fmt.Errorf("rows-affected: %v", err)
 		}
 		if num == 0 {
-			_, e := tx.Exec("INSERT INTO core (address, time, services, isnew, dayc) VALUES (?1,?2,?3,true,?+(SELECT dayc FROM config LIMIT 1))",
-				addrKey, unixTimeSec, services, remainDays)
+			_, e := tx.Exec("INSERT INTO core (address, time, services, isnew, dayc) VALUES (?1,?2,?3,true,0)",
+				addrKey, unixTimeSec, services)
 			if e != nil {
 				return fmt.Errorf("insert: %v", e)
 			}
@@ -474,7 +477,7 @@ func (s SQLiteStore) UpdateCoreTime(address Address) (err error) {
 	return s.doTxn("UpdateCoreTime", func(tx *sql.Tx) error {
 		addrKey := address.ToBytes()
 		unixTimeSec := time.Now().Unix()
-		_, err := tx.Exec("UPDATE core SET time=?, dayc=?+(SELECT dayc FROM config LIMIT 1) WHERE address=?", unixTimeSec, spec.MaxCoreNodeDays, addrKey)
+		_, err := tx.Exec("UPDATE core SET time=? WHERE address=?", unixTimeSec, addrKey)
 		if err != nil {
 			return fmt.Errorf("update: %v", err)
 		}

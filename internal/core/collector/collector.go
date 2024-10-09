@@ -164,16 +164,12 @@ func (c *Collector) collectAddresses(nodeAddr spec.Address) {
 				break
 			}
 			kept := 0
-			nowSec := time.Now().Unix()
+			unixTimeSec := time.Now().Unix()
+			validAfter := unixTimeSec - spec.MaxCoreNodeDays*spec.SecondsPerDay
 			for _, a := range addr.AddrList {
 				unixTimeSec := int64(a.Time)
-				ageDays := (nowSec - unixTimeSec) / spec.SecondsPerDay // round down
-				if ageDays < 0 {
-					ageDays = 0 // timestamp is newer than localtime
-				}
-				remainDays := spec.MaxCoreNodeDays - ageDays
-				if remainDays > 0 {
-					c.cstore.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, unixTimeSec, remainDays, a.Services)
+				if unixTimeSec > validAfter {
+					c.store.AddCoreNode(spec.Address{Host: net.IP(a.Address), Port: a.Port}, unixTimeSec, a.Services)
 					kept++
 				}
 			}

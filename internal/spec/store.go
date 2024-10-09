@@ -24,7 +24,7 @@ type Store interface {
 	NodeList() (res NodeListRes, err error)
 	TrimNodes() (advanced bool, remCore int64, remNode int64, err error)
 	// core nodes
-	AddCoreNode(address Address, time int64, remainDays int64, services uint64) error
+	AddCoreNode(address Address, time int64, services uint64) error
 	UpdateCoreTime(address Address) error
 	ChooseCoreNode() (Address, error)
 	// dogenet nodes
