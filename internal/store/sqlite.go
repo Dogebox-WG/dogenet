@@ -38,6 +38,9 @@ type Queryable interface {
 // WITHOUT ROWID: SQLite version 3.8.2 (2013-12-06) or later
 
 const SQL_SCHEMA string = `
+CREATE TABLE IF NOT EXISTS migration (
+	version INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS config (
 	dayc INTEGER NOT NULL,
 	last INTEGER NOT NULL
@@ -78,6 +81,17 @@ CREATE TABLE IF NOT EXISTS chan (
 ) WITHOUT ROWID;
 `
 
+const SQL_MIGRATION_v2 string = `
+ALTER TABLE announce ADD COLUMN owner BLOB
+`
+
+var MIGRATIONS = []struct {
+	ver   int
+	query string
+}{
+	{2, SQL_MIGRATION_v2},
+}
+
 // NewSQLiteStore returns a spec.Store implementation that uses SQLite
 func NewSQLiteStore(fileName string, ctx context.Context) (spec.Store, error) {
 	backend := "sqlite3"
@@ -86,19 +100,12 @@ func NewSQLiteStore(fileName string, ctx context.Context) (spec.Store, error) {
 	if err != nil {
 		return store, dbErr(err, "opening database")
 	}
-	setup_sql := SQL_SCHEMA
 	if backend == "sqlite3" {
 		// limit concurrent access until we figure out a way to start transactions
 		// with the BEGIN CONCURRENT statement in Go. Avoids "database locked" errors.
 		db.SetMaxOpenConns(1)
 	}
-	// init tables / indexes
-	_, err = db.Exec(setup_sql)
-	if err != nil {
-		return store, dbErr(err, "creating database schema")
-	}
-	// init config table
-	err = store.initConfig(ctx)
+	err = store.initSchema()
 	return store, err
 }
 
@@ -106,18 +113,62 @@ func (s *SQLiteStore) Close() {
 	s.db.Close()
 }
 
-func (s *SQLiteStore) initConfig(ctx context.Context) error {
-	sctx := SQLiteStoreCtx{_db: s.db, ctx: ctx}
-	return sctx.doTxn("init config", func(tx *sql.Tx) error {
-		config := tx.QueryRow("SELECT dayc,last FROM config LIMIT 1")
-		var dayc int64
-		var last int64
-		err := config.Scan(&dayc, &last)
+func (s *SQLiteStore) initSchema() error {
+	return s.doTxn("init schema", func(tx *sql.Tx) error {
+		// apply migrations
+		verRow := tx.QueryRow("SELECT version FROM migration LIMIT 1")
+		var version int
+		err := verRow.Scan(&version)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				_, err = tx.Exec("INSERT INTO config (dayc,last) VALUES (1,?)", unixDayStamp())
+			// first-time database init.
+			// init schema (idempotent)
+			_, err := tx.Exec(SQL_SCHEMA)
+			if err != nil {
+				return dbErr(err, "creating database schema")
 			}
-			return err
+			// set up version table (idempotent)
+			err = tx.QueryRow("SELECT version FROM migration LIMIT 1").Scan(&version)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					version = 1
+					_, err = tx.Exec("INSERT INTO migration (version) VALUES (?)", version)
+					if err != nil {
+						return dbErr(err, "updating version")
+					}
+				} else {
+					return dbErr(err, "querying version")
+				}
+			}
+			// set up config table (idempotent)
+			// this is application-specific.
+			var dayc int
+			err = tx.QueryRow("SELECT dayc FROM config LIMIT 1").Scan(&dayc)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					_, err = tx.Exec("INSERT INTO config (dayc,last) VALUES (1,?)", unixDayStamp())
+					if err != nil {
+						return dbErr(err, "inserting config row")
+					}
+				} else {
+					return dbErr(err, "querying config")
+				}
+			}
+		}
+		initVer := version
+		for _, m := range MIGRATIONS {
+			if version < m.ver {
+				_, err = tx.Exec(m.query)
+				if err != nil {
+					return dbErr(err, fmt.Sprintf("applying migration %v", m.ver))
+				}
+				version = m.ver
+			}
+		}
+		if version != initVer {
+			_, err = tx.Exec("UPDATE migration SET version=?", version)
+			if err != nil {
+				return dbErr(err, "updating version")
+			}
 		}
 		return nil
 	})
