@@ -32,6 +32,7 @@ const CoreNodeDefaultPort = 22556
 const DogeNetDefaultPort = dnet.DogeNetDefaultPort
 const DBFile = "dogenet.db"
 const GeoIPFile = "dbip-city-ipv4-num.csv"
+const DefaultStorage = "./storage"
 
 var HandlerDefaultBind = spec.BindTo{Network: "unix", Address: "/tmp/dogenet.sock"} // const
 
@@ -47,8 +48,8 @@ func main() {
 	core := dnet.Address{}
 	peers := []spec.NodeInfo{}
 	dbfile := DBFile
-	dir := "./storage"
-	flag.Func("dir", "<path> - storage directory (default '.')", func(arg string) error {
+	dir := DefaultStorage
+	flag.Func("dir", "<path> - storage directory (default './storage')", func(arg string) error {
 		ent, err := os.Stat(arg)
 		if err != nil {
 			stderr.Fatalf("--dir: %v", err)

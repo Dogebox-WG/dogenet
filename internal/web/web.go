@@ -122,6 +122,9 @@ func (a *WebAPI) getNodes(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, net := range list.Net {
+			// XXX this should look up the identity profile, if there is one,
+			// and include its lat,long,city,country in the response.
+			// which is a problem because we don't have the identity db.
 			addr, err := dnet.ParseAddress(net.Address)
 			if err != nil {
 				log.Printf("[GET /nodes] invalid core address: %v", net.Address)

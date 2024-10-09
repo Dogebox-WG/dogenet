@@ -1,6 +1,6 @@
 .DS_Store
-*.db
+/storage
+__debug_bin*
 /dogenet
 /dev-key*
-/ident-key*
-/ident-pub*
+/ident-*
