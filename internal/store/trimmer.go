@@ -26,14 +26,14 @@ func (sv *StoreTrimmer) Run() {
 		if sv.Sleep(1 * time.Hour) { // once an hour is enough
 			return // stopping
 		}
-		advanced, remCore, remNode, err := store.TrimNodes()
+		advanced, remNode, err := store.TrimNodes()
 		if err != nil {
 			log.Printf("[store] TrimNodes: %v", err)
 		} else {
 			if advanced {
 				log.Printf("[store] TrimNodes: day-count has advanced.")
 			}
-			log.Printf("[store] TrimNodes: trimmed %v core nodes, %d network nodes", remCore, remNode)
+			log.Printf("[store] TrimNodes: trimmed %d network nodes", remNode)
 		}
 	}
 }

@@ -19,8 +19,6 @@ import (
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/announce"
-	"code.dogecoin.org/dogenet/internal/core/collector"
-	"code.dogecoin.org/dogenet/internal/geoip"
 	"code.dogecoin.org/dogenet/internal/netsvc"
 	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/dogenet/internal/store"
@@ -28,10 +26,8 @@ import (
 )
 
 const WebAPIDefaultPort = 8085
-const CoreNodeDefaultPort = 22556
 const DogeNetDefaultPort = dnet.DogeNetDefaultPort
 const DBFile = "dogenet.db"
-const GeoIPFile = "dbip-city-ipv4-num.csv"
 const DefaultStorage = "./storage"
 
 var HandlerDefaultBind = spec.BindTo{Network: "unix", Address: "/tmp/dogenet.sock"} // const
@@ -39,13 +35,11 @@ var HandlerDefaultBind = spec.BindTo{Network: "unix", Address: "/tmp/dogenet.soc
 var stderr = log.New(os.Stderr, "", 0)
 
 func main() {
-	var crawl int
 	var allowLocal bool
 	binds := []dnet.Address{}
 	bindweb := []dnet.Address{}
 	handlerBind := HandlerDefaultBind
 	public := dnet.Address{}
-	core := dnet.Address{}
 	peers := []spec.NodeInfo{}
 	dbfile := DBFile
 	dir := DefaultStorage
@@ -60,7 +54,6 @@ func main() {
 		dir = arg
 		return nil
 	})
-	flag.IntVar(&crawl, "crawl", 0, "number of core node crawlers")
 	flag.StringVar(&dbfile, "db", DBFile, "path to SQLite database (relative: in storage dir)")
 	flag.BoolVar(&allowLocal, "local", false, "allow local 'public' addresses (for testing)")
 	flag.Func("bind", "Bind gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
@@ -95,14 +88,6 @@ func main() {
 			return err
 		}
 		public = addr
-		return nil
-	})
-	flag.Func("core", "<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
-		addr, err := parseIPPort(arg, "core", CoreNodeDefaultPort)
-		if err != nil {
-			return err
-		}
-		core = addr
 		return nil
 	})
 	flag.Func("peer", "<pubkey>:<ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
@@ -177,7 +162,7 @@ func main() {
 	nodeKey := keysFromEnv()
 	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub[:]))
 
-	// load the previously saved state.
+	// open the database.
 	dbpath := path.Join(dir, dbfile)
 	db, err := store.NewSQLiteStore(dbpath, context.Background())
 	if err != nil {
@@ -195,29 +180,9 @@ func main() {
 	// start the announcement service
 	gov.Add("announce", announce.New(public, nodeKey, db, netSvc, changes))
 
-	// stay connected to local node if specified.
-	if core.IsValid() {
-		gov.Add("local-node", collector.New(db, core, 60*time.Second, true))
-	}
-
-	// start crawling Core Nodes.
-	for n := 0; n < crawl; n++ {
-		gov.Add(fmt.Sprintf("crawler-%d", n), collector.New(db, store.Address{}, 5*time.Minute, false))
-	}
-
-	// load the geoIP database
-	// https://github.com/sapics/ip-location-db/tree/main/dbip-city/dbip-city-ipv4-num.csv.gz
-	geoFile := path.Join(dir, GeoIPFile)
-	log.Printf("loading GeoIP database: %v", geoFile)
-	geoIP, err := geoip.NewGeoIPDatabase(geoFile)
-	if err != nil {
-		log.Printf("Error reading GeoIP database: %v [%s]\n", err, geoFile)
-		os.Exit(1)
-	}
-
 	// start the web server.
 	for _, bind := range bindweb {
-		gov.Add("web-api", web.New(bind, db, netSvc, geoIP, nodeKey.Pub[:], public))
+		gov.Add("web-api", web.New(bind, db, netSvc))
 	}
 
 	// start the store trimmer

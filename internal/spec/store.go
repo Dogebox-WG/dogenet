@@ -19,14 +19,9 @@ const MaxCoreNodeDays = 3
 type Store interface {
 	WithCtx(ctx context.Context) Store
 	// common
-	CoreStats() (mapSize int, newNodes int, err error)
 	NetStats() (mapSize int, err error)
-	NodeList() (res NodeListRes, err error)
-	TrimNodes() (advanced bool, remCore int64, remNode int64, err error)
-	// core nodes
-	AddCoreNode(address Address, time int64, services uint64) error
-	UpdateCoreTime(address Address) error
-	ChooseCoreNode() (Address, error)
+	NodeList() (net []NetNode, err error)
+	TrimNodes() (advanced bool, remNode int64, err error)
 	// dogenet nodes
 	GetAnnounce() (payload []byte, sig []byte, time int64, owner []byte, err error)
 	SetAnnounce(payload []byte, sig []byte, time int64) error

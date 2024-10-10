@@ -13,7 +13,6 @@ import (
 
 	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/gossip/dnet"
-	"code.dogecoin.org/gossip/node"
 	"github.com/mattn/go-sqlite3"
 )
 
@@ -54,15 +53,6 @@ CREATE TABLE IF NOT EXISTS channels (
 	chan INTEGER NOT NULL PRIMARY KEY,
 	dayc INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS core (
-	address BLOB NOT NULL PRIMARY KEY,
-	time INTEGER NOT NULL,
-	services INTEGER NOT NULL,
-	isnew BOOLEAN NOT NULL,
-	dayc INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS core_time_i ON core (time);
-CREATE INDEX IF NOT EXISTS core_isnew_i ON core (isnew);
 CREATE TABLE IF NOT EXISTS node (
 	key BLOB NOT NULL PRIMARY KEY,
 	address BLOB NOT NULL,
@@ -265,22 +255,6 @@ func dbErr(err error, where string) error {
 
 // STORE INTERFACE
 
-func (s SQLiteStore) CoreStats() (mapSize int, newNodes int, err error) {
-	err = s.doTxn("CoreStats", func(tx *sql.Tx) error {
-		row := tx.QueryRow("WITH t AS (SELECT COUNT(address) AS num, 1 AS rn FROM core), u AS (SELECT COUNT(address) AS isnew, 1 AS rn FROM core WHERE isnew=TRUE) SELECT t.num, u.isnew FROM t INNER JOIN u ON t.rn=u.rn")
-		err := row.Scan(&mapSize, &newNodes)
-		if err != nil {
-			// special case: always return nil (no stats) errors.
-			if err != sql.ErrNoRows {
-				log.Printf("[Store] CoreStats: %v", err)
-			}
-			return nil
-		}
-		return nil
-	})
-	return
-}
-
 func (s SQLiteStore) NetStats() (mapSize int, err error) {
 	err = s.doTxn("NetStats", func(tx *sql.Tx) error {
 		row := tx.QueryRow("SELECT COUNT(key) AS num FROM node")
@@ -297,89 +271,53 @@ func (s SQLiteStore) NetStats() (mapSize int, err error) {
 	return
 }
 
-func (s SQLiteStore) coreNodeList(tx *sql.Tx) (res []spec.CoreNode, err error) {
-	rows, err := tx.Query("SELECT address,CAST(time AS INTEGER),services FROM core")
-	if err != nil {
-		return nil, fmt.Errorf("[Store] coreNodeList: query: %v", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var addr []byte
-		var unixTime int64
-		var services uint64
-		err := rows.Scan(&addr, &unixTime, &services)
-		if err != nil {
-			log.Printf("[Store] coreNodeList: scanning row: %v", err)
-			continue
-		}
-		s_adr, err := dnet.AddressFromBytes(addr)
-		if err != nil {
-			log.Printf("[Store] bad node address: %v", err)
-			continue
-		}
-		res = append(res, spec.CoreNode{
-			Address:  s_adr.String(),
-			Time:     unixTime,
-			Services: services,
-		})
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, fmt.Errorf("[Store] query: %v", err)
-	}
-	return
-}
+var ZeroIdentity [32]byte // zero-bytes
 
-func (s SQLiteStore) netNodeList(tx *sql.Tx) (res []spec.NetNode, err error) {
-	// use payload because it contains all the channels
-	rows, err := tx.Query("SELECT key,payload,CAST(time AS INTEGER) FROM node")
-	if err != nil {
-		return nil, fmt.Errorf("[Store] netNodeList: query: %v", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var pubkey []byte
-		var payload []byte
-		var unixTime int64
-		err := rows.Scan(&pubkey, &payload, &unixTime)
-		if err != nil {
-			return nil, fmt.Errorf("[Store] netNodeList: scanning row: %v", err)
-		}
-		amsg := node.DecodeAddrMsg(payload)
-		addr := Address{
-			Host: net.IP(amsg.Address),
-			Port: amsg.Port,
-		}
-		channels := make([]string, 0, len(amsg.Channels))
-		for _, c := range amsg.Channels {
-			channels = append(channels, c.String())
-		}
-		res = append(res, spec.NetNode{
-			PubKey:   hex.EncodeToString(pubkey),
-			Address:  addr.String(),
-			Time:     unixTime,
-			Channels: channels,
-			Identity: hex.EncodeToString(amsg.Owner),
-		})
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, fmt.Errorf("[Store] query: %v", err)
-	}
-	return
-}
-
-func (s SQLiteStore) NodeList() (res spec.NodeListRes, err error) {
+func (s SQLiteStore) NodeList() (netList []spec.NetNode, err error) {
 	err = s.doTxn("NodeList", func(tx *sql.Tx) error {
-		res.Core, err = s.coreNodeList(tx)
+		rows, err := tx.Query("SELECT key,address,owner FROM node")
 		if err != nil {
-			return err
+			return fmt.Errorf("[Store] netNodeList: query: %v", err)
 		}
-		res.Net, err = s.netNodeList(tx)
-		if err != nil {
-			return err
+		defer rows.Close()
+		for rows.Next() {
+			var pubkey []byte
+			var address []byte // 18-byte host:port from Address.ToBytes()
+			var owner []byte
+			err := rows.Scan(&pubkey, &address, &owner)
+			if err != nil {
+				return fmt.Errorf("[Store] netNodeList: scanning row: %v", err)
+			}
+			addr, err := dnet.AddressFromBytes(address)
+			if err != nil {
+				return fmt.Errorf("[Store] netNodeList: invalid address: %v", err)
+			}
+			// required for API spec.
+			if bytes.Equal(owner, ZeroIdentity[:]) {
+				owner = []byte{} // becomes empty-string
+			}
+			// string-encode and normalize for API spec.
+			netList = append(netList, spec.NetNode{
+				PubKey:   hex.EncodeToString(pubkey),
+				Address:  normalizeIP4(addr).String(),
+				Identity: hex.EncodeToString(owner),
+			})
+		}
+		if err = rows.Err(); err != nil { // docs say this check is required!
+			return fmt.Errorf("[Store] query: %v", err)
 		}
 		return nil
 	})
 	return
+}
+
+// normalizeIP4 normalizes an Address to IPv4 if possible.
+func normalizeIP4(addr spec.Address) spec.Address {
+	ipv4 := addr.Host.To4()
+	if ipv4 != nil {
+		return spec.Address{Host: ipv4, Port: addr.Port}
+	}
+	return addr
 }
 
 // TrimNodes expires records after N days.
@@ -393,7 +331,7 @@ func (s SQLiteStore) NodeList() (res spec.NodeListRes, err error) {
 // Records expire once their stored day-count is < today.
 //
 // This causes expiry to lag by the number of offline days.
-func (s SQLiteStore) TrimNodes() (advanced bool, remCore int64, remNode int64, err error) {
+func (s SQLiteStore) TrimNodes() (advanced bool, remNode int64, err error) {
 	err = s.doTxn("TrimNodes", func(tx *sql.Tx) error {
 		// check if date has changed
 		row := tx.QueryRow("SELECT dayc,last FROM config LIMIT 1")
@@ -432,78 +370,6 @@ func (s SQLiteStore) TrimNodes() (advanced bool, remCore int64, remNode int64, e
 			if err != nil {
 				return fmt.Errorf("TrimNodes: rows-affected: %v", err)
 			}
-		}
-		// expire core nodes,
-		// which don't use the day-count policy
-		// because a +/- 1 day tolerance is too much
-		unixTimeSec := time.Now().Unix()
-		expireBefore := unixTimeSec - spec.MaxCoreNodeDays*spec.SecondsPerDay
-		res, err := tx.Exec("DELETE FROM core WHERE time < ?", expireBefore)
-		if err != nil {
-			return fmt.Errorf("TrimNodes: DELETE core: %v", err)
-		}
-		remCore, err = res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("TrimNodes: rows-affected: %v", err)
-		}
-		return nil
-	})
-	return
-}
-
-func (s SQLiteStore) AddCoreNode(address Address, unixTimeSec int64, services uint64) error {
-	return s.doTxn("AddCoreNode", func(tx *sql.Tx) error {
-		addrKey := address.ToBytes()
-		res, err := tx.Exec("UPDATE core SET time=?, services=? WHERE address=?", unixTimeSec, services, addrKey)
-		if err != nil {
-			return fmt.Errorf("update: %v", err)
-		}
-		num, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("rows-affected: %v", err)
-		}
-		if num == 0 {
-			_, e := tx.Exec("INSERT INTO core (address, time, services, isnew, dayc) VALUES (?1,?2,?3,true,0)",
-				addrKey, unixTimeSec, services)
-			if e != nil {
-				return fmt.Errorf("insert: %v", e)
-			}
-		}
-		return nil
-	})
-}
-
-func (s SQLiteStore) UpdateCoreTime(address Address) (err error) {
-	return s.doTxn("UpdateCoreTime", func(tx *sql.Tx) error {
-		addrKey := address.ToBytes()
-		unixTimeSec := time.Now().Unix()
-		_, err := tx.Exec("UPDATE core SET time=? WHERE address=?", unixTimeSec, addrKey)
-		if err != nil {
-			return fmt.Errorf("update: %v", err)
-		}
-		return nil
-	})
-}
-
-func (s SQLiteStore) ChooseCoreNode() (res Address, err error) {
-	err = s.doTxn("ChooseCoreNode", func(tx *sql.Tx) error {
-		row := tx.QueryRow("SELECT address FROM core WHERE isnew=TRUE ORDER BY RANDOM() LIMIT 1")
-		var addr []byte
-		err := row.Scan(&addr)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				row = tx.QueryRow("SELECT address FROM core WHERE isnew=FALSE ORDER BY RANDOM() LIMIT 1")
-				err = row.Scan(&addr)
-				if err != nil {
-					return fmt.Errorf("query-not-new: %v", err)
-				}
-			} else {
-				return fmt.Errorf("query-is-new: %v", err)
-			}
-		}
-		res, err = dnet.AddressFromBytes(addr)
-		if err != nil {
-			return fmt.Errorf("invalid address: %v", err)
 		}
 		return nil
 	})

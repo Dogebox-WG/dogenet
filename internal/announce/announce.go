@@ -177,15 +177,31 @@ func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (raw dnet.RawMessag
 	if !newMsg.IsValid() {
 		return dnet.RawMessage{}, AnnounceLongevity, false
 	}
+
+	// create and sign the new announcement.
 	now := time.Now()
 	newMsg.Time = dnet.UnixToDoge(now)
 	log.Printf("[announce] signing a new announcement: %v", newMsg)
 	payload := newMsg.Encode()
 	msg := dnet.EncodeMessage(node.ChannelNode, node.TagAddress, ns.nodeKey, payload)
+
+	// store the announcement to re-use on next startup.
 	view := dnet.MsgView(msg)
-	err := ns.store.SetAnnounce(payload, view.Signature()[:], now.Add(AnnounceLongevity).Unix())
+	sig := view.Signature()[:]
+	err := ns.store.SetAnnounce(payload, sig, now.Add(AnnounceLongevity).Unix())
 	if err != nil {
 		log.Printf("[announce] cannot store announcement: %v", err)
 	}
+
+	// update this node in the local database.
+	// this makes the node visible to services on the local node.
+	nodePub := ns.nodeKey.Pub[:]
+	nodeAddr := spec.Address{Host: newMsg.Address, Port: newMsg.Port}
+	time := newMsg.Time.Local().Unix()
+	_, err = ns.store.AddNetNode(nodePub, nodeAddr, time, newMsg.Owner, newMsg.Channels, payload, sig)
+	if err != nil {
+		log.Printf("[announce] cannot store announcement: %v", err)
+	}
+
 	return dnet.RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity, true
 }
