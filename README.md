@@ -18,16 +18,6 @@ connecting to other participating nodes.)
 
 The node database is also used to populate the DogeMap *pup*[^1].
 
-## Core Nodes
-
-DogeNet includes a background *crawler* service to discover Core Nodes
-for display in the DogeMap *pup*[^1]. This service is optional.
-
-When DogeNet is configured with a local Core Node ip-address, it also
-*scrapes* known Core Nodes periodically from the local Core Node.
-This is likely sufficient to approximately map out the active Core Nodes
-over time, without placing any additional load on the Core network.
-
 ## Protocol Handlers
 
 DogeNet exposes a local UNIX-domain socket for Protocol Handlers to connect
