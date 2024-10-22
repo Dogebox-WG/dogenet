@@ -233,7 +233,7 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	ip := net.IP(addr.Address)
 	peerAddr := dnet.Address{Host: ip, Port: addr.Port}
 	hexpub := hex.EncodeToString(msg.PubKey)
-	log.Printf("received announce: %v [%v]", peerAddr, hexpub)
+	//log.Printf("received announce: %v [%v]", peerAddr, hexpub)
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() {
 		if peer.allowLocal {
 			log.Printf("peer announced a private address: %v [%v] (allowed via --local=true)", peerAddr, hexpub)
@@ -251,11 +251,13 @@ func (peer *peerConn) ingestAddress(msg dnet.Message) (who string, err error) {
 	who = fmt.Sprintf("%v/%v", hex.EncodeToString(msg.PubKey[0:6]), peerAddr)
 	peer.setPeerAddress(peerAddr)
 	// Add the peer to our database (update peer info for known peer)
-	log.Printf("[%s] adding node: %v %v", who, peerAddr, hexpub)
 	isnew, err := peer.store.AddNetNode(msg.PubKey, peerAddr, ts.Unix(), addr.Owner, addr.Channels, msg.Payload, msg.Signature)
 	if isnew {
+		log.Printf("[%s] added node: %v %v", who, peerAddr, hexpub)
 		// re-broadcast the `Addr` message to all connected peers
 		peer.ns.forwardToPeers(dnet.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
+	} else {
+		log.Printf("[%s] already known: %v %v", who, peerAddr, hexpub)
 	}
 	return
 }

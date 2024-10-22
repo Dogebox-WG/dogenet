@@ -82,7 +82,7 @@ func (hand *handlerConn) receiveFromHandler() {
 			return
 		}
 		// forward the message to all peers (ignore channel here)
-		log.Printf("[%s] received from handler: %v %v", hand.name, msg.Chan, msg.Tag)
+		log.Printf("[%s] received from handler: [%v][%v]", hand.name, msg.Chan, msg.Tag)
 		hand.ns.forwardToPeers(dnet.RawMessage{Header: msg.RawHdr, Payload: msg.Payload})
 	}
 }
@@ -109,7 +109,7 @@ func (hand *handlerConn) sendToHandler() {
 		case raw := <-send:
 			// forward the raw message to the handler
 			cha, tag := dnet.MsgView(raw.Header).ChanTag()
-			log.Printf("[%s] sending to handler: %v %v", hand.name, cha, tag)
+			log.Printf("[%s] sending to handler: [%v][%v]", hand.name, cha, tag)
 			_, err := conn.Write(raw.Header)
 			if err != nil {
 				log.Printf("[%s] cannot send to handler: %v", hand.name, err)

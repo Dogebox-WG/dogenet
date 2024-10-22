@@ -20,7 +20,8 @@ import (
 const IdealPeers = 8
 const PeerLockTime = 30 * time.Second          // was 5 minutes, now 30 seconds
 const SeedAttemptTime = 60 * time.Second       // time between seed connect attempts
-const GossipAddressInverval = 25 * time.Second // gossip a random address to the peer
+const SeedAttemptRandom = 10                   // randomness in the interval, in seconds
+const GossipAddressInverval = 60 * time.Second // gossip a random address to the peer
 const GossipAddressRandom = 10                 // randomness in the interval, in seconds
 const SeedDNS = "seed.dogecoin.org"            // seed peer addresses (DNS lookup)
 
@@ -188,7 +189,7 @@ func (ns *NetService) acceptHandlers() {
 func (ns *NetService) gossipRandomAddresses() {
 	for !ns.Stopping() {
 		// wait for next turn
-		time.Sleep(GossipAddressInverval + time.Duration(rand.Intn(GossipAddressRandom))*time.Second)
+		ns.Sleep(GossipAddressInverval + time.Duration(rand.Intn(GossipAddressRandom))*time.Second)
 
 		// choose a random node address
 		nm, err := ns.store.ChooseNetNodeMsg()
@@ -243,7 +244,7 @@ func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 			return np
 		default:
 			if ns.countPeers() < IdealPeers {
-				ns.Sleep(time.Second) // avoid spinning
+				ns.Sleep(5 * time.Second) // slowly
 				np, err := ns.store.ChooseNetNode()
 				if err != nil {
 					if !spec.IsNotFoundError(err) {
@@ -466,7 +467,7 @@ func (ns *NetService) seedFromDNS() {
 		} else if len(seed_ips) > 0 {
 			break
 		}
-		ns.Sleep(SeedAttemptTime)
+		ns.Sleep(SeedAttemptTime + time.Duration(rand.Intn(SeedAttemptRandom))*time.Second)
 	}
 	log.Printf("[%s] resolved seeds: %v", who, seed_ips)
 	for len(seed_ips) > 0 && !ns.Stopping() {
@@ -495,6 +496,6 @@ func (ns *NetService) seedFromDNS() {
 		seed_ips[idx] = seed_ips[len(seed_ips)-1]
 		seed_ips = seed_ips[:len(seed_ips)-1]
 		// always proceed slowly
-		ns.Sleep(SeedAttemptTime)
+		ns.Sleep(SeedAttemptTime + time.Duration(rand.Intn(SeedAttemptRandom))*time.Second)
 	}
 }
