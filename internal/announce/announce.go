@@ -3,7 +3,13 @@ package announce
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"math/rand"
+	"net"
+	"net/http"
 	"slices"
 	"time"
 
@@ -15,6 +21,10 @@ import (
 
 const AnnounceLongevity = 24 * time.Hour
 const QueueAnnouncement = 10 * time.Second
+const DogeNetDefaultPort = dnet.DogeNetDefaultPort
+const ReflectorUrl = "https://reflector.dogecoin.org/me"
+const ReflectorRetry = 10 * time.Second
+const RetryRandom = 10
 
 var ZeroOwner [32]byte
 
@@ -26,9 +36,10 @@ type Announce struct {
 	changes      chan any              // input: changes to public address, owner pubkey, channels we have handlers for.
 	receiver     spec.AnnounceReceiver // output: AnnounceReceiver receives new announcement RawMessages
 	nextAnnounce node.AddressMsg       // current: public address, owner pubkey, channels, services
+	useReflector bool                  // use reflector to obtain public address
 }
 
-func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver spec.AnnounceReceiver, changes chan any) *Announce {
+func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver spec.AnnounceReceiver, changes chan any, useReflector bool) *Announce {
 	return &Announce{
 		_store:   store,
 		nodeKey:  nodeKey,
@@ -36,7 +47,7 @@ func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver s
 		receiver: receiver,
 		nextAnnounce: node.AddressMsg{
 			// Time is dynamically updated
-			Address: public.Host.To16(),
+			Address: public.Host.To16(), // nil if useReflector
 			Port:    public.Port,
 			Owner:   ZeroOwner[:], // announce zero-bytes unless we have an owner
 			// Channels: are dynamically updated
@@ -45,12 +56,17 @@ func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver s
 				{Tag: dnet.ServiceCore, Port: 22556},
 			},
 		},
+		useReflector: useReflector,
 	}
 }
 
 // goroutine
 func (ns *Announce) Run() {
 	ns.store = ns._store.WithCtx(ns.Context) // Service Context is first available here
+	if ns.useReflector {
+		ns.fetchPublicAddress()
+	}
+	log.Printf("[announce] using public address: %v:%v", net.IP(ns.nextAnnounce.Address), ns.nextAnnounce.Port)
 	msg, remain, ok := ns.loadOrGenerateAnnounce()
 	if ok {
 		ns.receiver.ReceiveAnnounce(msg)
@@ -204,4 +220,61 @@ func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (raw dnet.RawMessag
 	}
 
 	return dnet.RawMessage{Header: view.Header(), Payload: payload}, AnnounceLongevity, true
+}
+
+type MyIPResult struct {
+	IP string `json:"ip"`
+}
+
+func (ns *Announce) fetchPublicAddress() {
+	backoff := ReflectorRetry
+	for !ns.Stopping() {
+		log.Printf("[announce] obtaining public IP address from reflector…")
+		var res MyIPResult
+		err := fetchJson(ReflectorUrl, &res)
+		if err == nil {
+			ip := net.ParseIP(res.IP)
+			if ip != nil {
+				ip16 := ip.To16()
+				if ip16 != nil {
+					// success.
+					ns.nextAnnounce.Address = ip16
+					ns.nextAnnounce.Port = DogeNetDefaultPort
+					return
+				} else {
+					log.Printf("[announce] reflector: obtained invalid IP address: %v", res.IP)
+				}
+			} else {
+				log.Printf("[announce] reflector: obtained invalid IP address: %v", res.IP)
+			}
+		} else {
+			log.Printf("[announce] reflector: cannot obtain public IP address: %v", err)
+		}
+		backoff += 5
+		if backoff > 60 {
+			backoff = 60
+		}
+		ns.Sleep(backoff + time.Duration(rand.Intn(RetryRandom))*time.Second)
+	}
+}
+
+// fetch Json from an http endpoint.
+func fetchJson(url string, result any) (err error) {
+	res, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("fetch: %v: %v", url, err)
+	}
+	defer res.Body.Close() // ensure body is closed
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("fetch: %v: status %v", url, res.StatusCode)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("fetch: %v: %v", url, err)
+	}
+	err = json.Unmarshal(body, result)
+	if err != nil {
+		return fmt.Errorf("fetch: %v: json decode: %v", url, err)
+	}
+	return nil
 }

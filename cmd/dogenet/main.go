@@ -40,6 +40,7 @@ func main() {
 	bindweb := []dnet.Address{}
 	handlerBind := HandlerDefaultBind
 	public := dnet.Address{}
+	useReflector := false
 	peers := []spec.NodeInfo{}
 	dbfile := DBFile
 	dir := DefaultStorage
@@ -80,7 +81,8 @@ func main() {
 		handlerBind = bind
 		return nil
 	})
-	flag.Func("public", "Set public (router) gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
+	flag.BoolVar(&useReflector, "reflector", false, fmt.Sprintf("Use reflector (%s) to obtain public (ISP) address", announce.ReflectorUrl))
+	flag.Func("public", "Set public (ISP) gossip <ip>:<port> (use [<ip>]:<port> for IPv6)", func(arg string) error {
 		// use DogeNetDefaultPort by default (rather than the --bind port)
 		// this is typically correct even if bind-port is something different
 		addr, err := parseIPPort(arg, "public", DogeNetDefaultPort)
@@ -149,12 +151,14 @@ func main() {
 			Port: WebAPIDefaultPort,
 		})
 	}
-	if !public.IsValid() {
-		log.Printf("node public address must be specified via --public")
-		os.Exit(1)
-	}
-	if !allowLocal && (!public.Host.IsGlobalUnicast() || public.Host.IsPrivate()) {
-		log.Printf("bad --public address: cannot be a private or multicast address")
+	if public.IsValid() {
+		if !allowLocal && (!public.Host.IsGlobalUnicast() || public.Host.IsPrivate()) {
+			log.Printf("bad --public address: cannot be a private or multicast address")
+			os.Exit(1)
+		}
+		useReflector = false // valid --public IP overrides --reflector
+	} else if !useReflector {
+		log.Printf("node public address must be specified via --public or --reflector")
 		os.Exit(1)
 	}
 
@@ -178,7 +182,7 @@ func main() {
 	gov.Add("gossip", netSvc)
 
 	// start the announcement service
-	gov.Add("announce", announce.New(public, nodeKey, db, netSvc, changes))
+	gov.Add("announce", announce.New(public, nodeKey, db, netSvc, changes, useReflector))
 
 	// start the web server.
 	for _, bind := range bindweb {
