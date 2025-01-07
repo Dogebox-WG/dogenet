@@ -491,10 +491,10 @@ func (ns *NetService) seedFromDNS() {
 				conn.Close()
 				return
 			}
+			// remove from unordered array
+			seed_ips[idx] = seed_ips[len(seed_ips)-1]
+			seed_ips = seed_ips[:len(seed_ips)-1]
 		}
-		// remove from unordered array
-		seed_ips[idx] = seed_ips[len(seed_ips)-1]
-		seed_ips = seed_ips[:len(seed_ips)-1]
 		// always proceed slowly
 		ns.Sleep(SeedAttemptTime + time.Duration(rand.Intn(SeedAttemptRandom))*time.Second)
 	}
