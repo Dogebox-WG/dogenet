@@ -213,7 +213,7 @@ func (ns *NetService) findPeers() {
 	for !ns.Stopping() {
 		node, isNewPeer := ns.choosePeer(who) // blocking
 		pubHex := hex.EncodeToString(node.PubKey[:])
-		if node.IsValid() && !ns.havePeer(node.PubKey) && ns.lockPeer(node.PubKey) && !ns.isMyAddress(node) {
+		if node.IsValid() && !ns.havePeer(node.PubKey) && ns.lockPeer(node.PubKey) && !ns.isMyHost(node) {
 			log.Printf("[%s] choosing peer: %v [%v]", who, node.Addr, pubHex)
 			// attempt to connect to the peer
 			d := net.Dialer{Timeout: 30 * time.Second}
@@ -241,8 +241,8 @@ func (ns *NetService) findPeers() {
 				log.Printf("[%s] ADDED PEER ignored - not a valid address: %v [%v]", who, node.Addr, pubHex)
 			} else if ns.havePeer(node.PubKey) {
 				log.Printf("[%s] ADDED PEER ignored - already connected (same pubkey): %v [%v]", who, node.Addr, pubHex)
-			} else if ns.isMyAddress(node) {
-				log.Printf("[%s] ADDED PEER ignored - added this node's address (same ip:port): %v [%v]", who, node.Addr, pubHex)
+			} else if ns.isMyHost(node) {
+				log.Printf("[%s] ADDED PEER ignored - added this node's address (same ip): %v [%v]", who, node.Addr, pubHex)
 			} else {
 				log.Printf("[%s] ADDED PEER ignored - locked out for 30 sec (same pubkey): %v [%v]", who, node.Addr, pubHex)
 			}
@@ -251,12 +251,9 @@ func (ns *NetService) findPeers() {
 	}
 }
 
-func (ns *NetService) isMyAddress(node spec.NodeInfo) bool {
-	log.Printf("[%s] isMyAddress: %v", ns.ServiceName, node.Addr)
-	log.Printf("[%s] bindAddrs: %v", ns.ServiceName, ns.bindAddrs)
-
+func (ns *NetService) isMyHost(node spec.NodeInfo) bool {
 	for _, addr := range ns.bindAddrs {
-		if addr.Equal(node.Addr) {
+		if addr.Host.Equal(node.Addr.Host) {
 			return true
 		}
 	}
