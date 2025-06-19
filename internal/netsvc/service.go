@@ -252,6 +252,9 @@ func (ns *NetService) findPeers() {
 }
 
 func (ns *NetService) isMyAddress(node spec.NodeInfo) bool {
+	log.Printf("[%s] isMyAddress: %v", ns.ServiceName, node.Addr)
+	log.Printf("[%s] bindAddrs: %v", ns.ServiceName, ns.bindAddrs)
+
 	for _, addr := range ns.bindAddrs {
 		if addr.Equal(node.Addr) {
 			return true
