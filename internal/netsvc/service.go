@@ -211,15 +211,19 @@ func (ns *NetService) gossipRandomAddresses() {
 func (ns *NetService) findPeers() {
 	who := "find-peers"
 	for !ns.Stopping() {
-		node := ns.choosePeer(who) // blocking
+		node, isNewPeer := ns.choosePeer(who) // blocking
 		pubHex := hex.EncodeToString(node.PubKey[:])
-		if node.IsValid() && !ns.havePeer(node.PubKey) && ns.lockPeer(node.PubKey) {
+		if node.IsValid() && !ns.havePeer(node.PubKey) && ns.lockPeer(node.PubKey) && !ns.isMyAddress(node) {
 			log.Printf("[%s] choosing peer: %v [%v]", who, node.Addr, pubHex)
 			// attempt to connect to the peer
 			d := net.Dialer{Timeout: 30 * time.Second}
 			conn, err := d.DialContext(ns.Context, "tcp", node.Addr.String())
 			if err != nil {
-				log.Printf("[%s] connect failed: %v", who, err)
+				if isNewPeer {
+					log.Printf("[%s] ADDED PEER dropped - connect failed: %v %v [%v]", who, err, node.Addr, pubHex)
+				} else {
+					log.Printf("[%s] connect failed: %v", who, err)
+				}
 			} else {
 				peer := newPeer(conn, node.Addr, node.PubKey, true, true, ns) // outbound connection
 				if ns.trackPeer(conn, peer, node.PubKey) {
@@ -231,17 +235,37 @@ func (ns *NetService) findPeers() {
 					return
 				}
 			}
+		} else if isNewPeer {
+			// logging for explicitly added peers
+			if !node.IsValid() {
+				log.Printf("[%s] ADDED PEER ignored - not a valid address: %v [%v]", who, node.Addr, pubHex)
+			} else if ns.havePeer(node.PubKey) {
+				log.Printf("[%s] ADDED PEER ignored - already connected (same pubkey): %v [%v]", who, node.Addr, pubHex)
+			} else if ns.isMyAddress(node) {
+				log.Printf("[%s] ADDED PEER ignored - added this node's address (same ip:port): %v [%v]", who, node.Addr, pubHex)
+			} else {
+				log.Printf("[%s] ADDED PEER ignored - locked out for 30 sec (same pubkey): %v [%v]", who, node.Addr, pubHex)
+			}
 		}
 		ns.Sleep(5 * time.Second) // slowly
 	}
 }
 
+func (ns *NetService) isMyAddress(node spec.NodeInfo) bool {
+	for _, addr := range ns.bindAddrs {
+		if addr.Equal(node.Addr) {
+			return true
+		}
+	}
+	return false
+}
+
 // called from attractPeers
-func (ns *NetService) choosePeer(who string) spec.NodeInfo {
+func (ns *NetService) choosePeer(who string) (addr spec.NodeInfo, isNewPeer bool) {
 	for !ns.Stopping() {
 		select {
 		case np := <-ns.newPeers: // from ns.AddPeer()
-			return np
+			return np, true
 		default:
 			if ns.countPeers() < IdealPeers {
 				ns.Sleep(5 * time.Second) // slowly
@@ -251,19 +275,19 @@ func (ns *NetService) choosePeer(who string) spec.NodeInfo {
 						log.Printf("[%s] ChooseNetNode: %v", who, err)
 					}
 				} else {
-					return np
+					return np, false
 				}
 			}
 		}
 		// no peer available/required: sleep while receiving.
 		select {
 		case np := <-ns.newPeers: // from ns.AddPeer()
-			return np
+			return np, true
 		case <-time.After(30 * time.Second):
 			continue
 		}
 	}
-	return spec.NodeInfo{}
+	return spec.NodeInfo{}, false
 }
 
 // called from any
