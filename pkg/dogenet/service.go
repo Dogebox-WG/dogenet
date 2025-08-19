@@ -1,7 +1,6 @@
 package dogenet
 
 import (
-	"context"
 	"log"
 
 	"code.dogecoin.org/dogenet/internal/announce"
@@ -27,7 +26,7 @@ type DogeNetConfig struct {
 
 func DogeNet(gov governor.Governor, cfg DogeNetConfig) error {
 	// open the database.
-	db, err := store.NewSQLiteStore(cfg.DBFile, context.Background())
+	db, err := store.NewSQLiteStore(cfg.DBFile, gov.GlobalContext())
 	if err != nil {
 		log.Printf("Error opening database: %v [%s]\n", err, cfg.DBFile)
 		return err
