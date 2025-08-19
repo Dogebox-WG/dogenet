@@ -25,7 +25,7 @@ type DogeNetConfig struct {
 	UseReflector bool
 }
 
-func SetupDogeNet(gov governor.Governor, cfg DogeNetConfig) error {
+func DogeNet(gov governor.Governor, cfg DogeNetConfig) error {
 	// open the database.
 	db, err := store.NewSQLiteStore(cfg.DBFile, context.Background())
 	if err != nil {
