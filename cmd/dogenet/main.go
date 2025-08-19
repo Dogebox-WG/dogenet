@@ -176,7 +176,7 @@ func main() {
 		UseReflector: useReflector,
 	}
 
-	err := dogenet.SetupDogeNet(gov, config)
+	err := dogenet.DogeNet(gov, config)
 	if err != nil {
 		log.Fatal(err)
 	}
