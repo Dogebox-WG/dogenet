@@ -3,7 +3,6 @@ package dogenet
 import (
 	"context"
 	"log"
-	"path"
 
 	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/netsvc"
@@ -24,36 +23,31 @@ type DogeNetConfig struct {
 	AllowLocal   bool
 	Public       dnet.Address
 	UseReflector bool
-	Govenor      governor.Governor
 }
 
-func StartDogeNetService(s DogeNetConfig) error {
+func SetupDogeNet(gov governor.Governor, cfg DogeNetConfig) error {
 	// open the database.
-	dbpath := path.Join(s.Dir, s.DBFile)
-	db, err := store.NewSQLiteStore(dbpath, context.Background())
+	db, err := store.NewSQLiteStore(cfg.DBFile, context.Background())
 	if err != nil {
-		log.Printf("Error opening database: %v [%s]\n", err, dbpath)
+		log.Printf("Error opening database: %v [%s]\n", err, cfg.DBFile)
 		return err
 	}
 
 	// start the gossip server
 	changes := make(chan any, 10)
-	netSvc := netsvc.New(s.Binds, s.HandlerBind, s.NodeKey, db, s.AllowLocal, changes)
-	s.Govenor.Add("gossip", netSvc)
+	netSvc := netsvc.New(cfg.Binds, cfg.HandlerBind, cfg.NodeKey, db, cfg.AllowLocal, changes)
+	gov.Add("gossip", netSvc)
 
 	// start the announcement service
-	s.Govenor.Add("announce", announce.New(s.Public, s.NodeKey, db, netSvc, changes, s.UseReflector))
+	gov.Add("announce", announce.New(cfg.Public, cfg.NodeKey, db, netSvc, changes, cfg.UseReflector))
 
 	// start the web server.
-	for _, bind := range s.BindWeb {
-		s.Govenor.Add("web-api", web.New(bind, db, netSvc))
+	for _, bind := range cfg.BindWeb {
+		gov.Add("web-api", web.New(bind, db, netSvc))
 	}
 
 	// start the store trimmer
-	s.Govenor.Add("store", store.NewStoreTrimmer(db))
-
-	// run services until interrupted.
-	s.Govenor.Start()
+	gov.Add("store", store.NewStoreTrimmer(db))
 
 	return nil
 }

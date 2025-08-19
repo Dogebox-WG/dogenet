@@ -174,14 +174,15 @@ func main() {
 		AllowLocal:   allowLocal,
 		Public:       public,
 		UseReflector: useReflector,
-		Govenor:      gov,
 	}
 
-	err := dogenet.StartDogeNetService(config)
+	err := dogenet.SetupDogeNet(gov, config)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// run services until interrupted.
+	gov.Start()
 	gov.WaitForShutdown()
 
 	fmt.Println("finished.")
