@@ -11,8 +11,10 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"code.dogecoin.org/gossip/dnet"
+	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/spec"
@@ -160,7 +162,9 @@ func main() {
 	nodeKey := keysFromEnv()
 	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub[:]))
 
-	service := dogenet.DogeNetService{
+	gov := governor.New().CatchSignals().Restart(1 * time.Second)
+
+	config := dogenet.DogeNetConfig{
 		NodeKey:      nodeKey,
 		Binds:        binds,
 		BindWeb:      bindweb,
@@ -170,12 +174,15 @@ func main() {
 		AllowLocal:   allowLocal,
 		Public:       public,
 		UseReflector: useReflector,
+		Govenor:      gov,
 	}
 
-	err := service.Start()
+	err := dogenet.StartDogeNetService(config)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	gov.WaitForShutdown()
 
 	fmt.Println("finished.")
 }
