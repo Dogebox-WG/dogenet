@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -15,14 +14,11 @@ import (
 	"time"
 
 	"code.dogecoin.org/gossip/dnet"
-
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/announce"
-	"code.dogecoin.org/dogenet/internal/netsvc"
 	"code.dogecoin.org/dogenet/internal/spec"
-	"code.dogecoin.org/dogenet/internal/store"
-	"code.dogecoin.org/dogenet/internal/web"
+	"code.dogecoin.org/dogenet/pkg/dogenet"
 )
 
 const WebAPIDefaultPort = 8085
@@ -166,35 +162,29 @@ func main() {
 	nodeKey := keysFromEnv()
 	log.Printf("Node PubKey is: %v", hex.EncodeToString(nodeKey.Pub[:]))
 
-	// open the database.
-	dbpath := path.Join(dir, dbfile)
-	db, err := store.NewSQLiteStore(dbpath, context.Background())
-	if err != nil {
-		log.Printf("Error opening database: %v [%s]\n", err, dbpath)
-		os.Exit(1)
-	}
-
 	gov := governor.New().CatchSignals().Restart(1 * time.Second)
 
-	// start the gossip server
-	changes := make(chan any, 10)
-	netSvc := netsvc.New(binds, handlerBind, nodeKey, db, allowLocal, changes)
-	gov.Add("gossip", netSvc)
-
-	// start the announcement service
-	gov.Add("announce", announce.New(public, nodeKey, db, netSvc, changes, useReflector))
-
-	// start the web server.
-	for _, bind := range bindweb {
-		gov.Add("web-api", web.New(bind, db, netSvc))
+	config := dogenet.DogeNetConfig{
+		NodeKey:      nodeKey,
+		Binds:        binds,
+		BindWeb:      bindweb,
+		Dir:          dir,
+		DBFile:       dbfile,
+		HandlerBind:  handlerBind,
+		AllowLocal:   allowLocal,
+		Public:       public,
+		UseReflector: useReflector,
 	}
 
-	// start the store trimmer
-	gov.Add("store", store.NewStoreTrimmer(db))
+	err := dogenet.DogeNet(gov, config)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// run services until interrupted.
 	gov.Start()
 	gov.WaitForShutdown()
+
 	fmt.Println("finished.")
 }
 
