@@ -8,7 +8,7 @@ import (
 	"net"
 	"sync/atomic"
 
-	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/spec"
 	"code.dogecoin.org/gossip/dnet"
 )
 

@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/spec"
 	"code.dogecoin.org/gossip/dnet"
 	"github.com/mattn/go-sqlite3"
 )

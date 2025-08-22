@@ -14,7 +14,7 @@ import (
 	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/gossip/node"
 
-	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/spec"
 )
 
 const OldestAddrTime = -(30 * 24) * time.Hour // 30 days in the past

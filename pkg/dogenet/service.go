@@ -5,9 +5,9 @@ import (
 
 	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/netsvc"
-	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/dogenet/internal/store"
 	"code.dogecoin.org/dogenet/internal/web"
+	"code.dogecoin.org/dogenet/pkg/spec"
 	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/governor"
 )

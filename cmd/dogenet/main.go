@@ -17,8 +17,8 @@ import (
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/announce"
-	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/dogenet/pkg/dogenet"
+	"code.dogecoin.org/dogenet/pkg/spec"
 )
 
 const WebAPIDefaultPort = 8085
