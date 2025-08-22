@@ -1,8 +1,10 @@
 package spec
 
+import "code.dogecoin.org/dogenet/pkg/address"
+
 type NodeInfo struct {
 	PubKey [32]byte // array to be used as map key
-	Addr   Address
+	Addr   address.Address
 }
 
 func (n NodeInfo) IsValid() bool {

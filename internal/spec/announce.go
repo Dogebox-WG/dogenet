@@ -1,13 +1,16 @@
 package spec
 
-import "code.dogecoin.org/gossip/dnet"
+import (
+	"code.dogecoin.org/dogenet/pkg/address"
+	"code.dogecoin.org/gossip/dnet"
+)
 
 type AnnounceReceiver interface {
 	ReceiveAnnounce(announce dnet.RawMessage)
 }
 
 type ChangePublicAddress struct {
-	Addr Address
+	Addr address.Address
 }
 
 type ChangeOwnerKey struct {

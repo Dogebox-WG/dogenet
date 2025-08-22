@@ -15,6 +15,7 @@ import (
 	"code.dogecoin.org/governor"
 
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/address"
 )
 
 const IdealPeers = 8
@@ -27,8 +28,8 @@ const SeedDNS = "seed.dogecoin.org"            // seed peer addresses (DNS looku
 
 type NetService struct {
 	governor.ServiceCtx
-	bindAddrs       []spec.Address // bind-to address on THIS node
-	handlerBind     spec.BindTo
+	bindAddrs       []address.Address // bind-to address on THIS node
+	handlerBind     address.BindTo
 	allowLocal      bool // allow local IP address in Announcement messages (for local testing)
 	_store          spec.Store
 	store           spec.Store
@@ -50,7 +51,7 @@ type MapPubKey = [32]byte
 
 var NoPubKey [32]byte // zeroes
 
-func New(bind []spec.Address, handlerBind spec.BindTo, nodeKey dnet.KeyPair, store spec.Store, allowLocal bool, announceChanges chan any) spec.NetSvc {
+func New(bind []address.Address, handlerBind address.BindTo, nodeKey dnet.KeyPair, store spec.Store, allowLocal bool, announceChanges chan any) spec.NetSvc {
 	return &NetService{
 		bindAddrs:       bind,
 		handlerBind:     handlerBind,

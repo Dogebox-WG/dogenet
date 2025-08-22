@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/address"
 	"code.dogecoin.org/gossip/dnet"
 	"github.com/mattn/go-sqlite3"
 )
 
-type NodeID = spec.NodeID
-type Address = spec.Address
+type NodeID = address.NodeID
+type Address = address.Address
 
 // SELECT * FROM table WHERE id IN (SELECT id FROM table ORDER BY RANDOM() LIMIT 10)
 
@@ -312,10 +313,10 @@ func (s SQLiteStore) NodeList() (netList []spec.NetNode, err error) {
 }
 
 // normalizeIP4 normalizes an Address to IPv4 if possible.
-func normalizeIP4(addr spec.Address) spec.Address {
+func normalizeIP4(addr address.Address) address.Address {
 	ipv4 := addr.Host.To4()
 	if ipv4 != nil {
-		return spec.Address{Host: ipv4, Port: addr.Port}
+		return address.Address{Host: ipv4, Port: addr.Port}
 	}
 	return addr
 }

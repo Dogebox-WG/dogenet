@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 
+	"code.dogecoin.org/dogenet/pkg/address"
 	"code.dogecoin.org/gossip/dnet"
 )
 
@@ -26,7 +27,7 @@ type Store interface {
 	GetAnnounce() (payload []byte, sig []byte, time int64, owner []byte, err error)
 	SetAnnounce(payload []byte, sig []byte, time int64) error
 	SetAnnounceOwner(owner []byte) error
-	AddNetNode(key []byte, address Address, time int64, owner []byte, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error)
+	AddNetNode(key []byte, address address.Address, time int64, owner []byte, channels []dnet.Tag4CC, payload []byte, sig []byte) (changed bool, err error)
 	UpdateNetTime(key []byte) error
 	ChooseNetNode() (NodeInfo, error)
 	ChooseNetNodeMsg() (NodeRecord, error)

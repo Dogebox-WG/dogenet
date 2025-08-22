@@ -15,6 +15,7 @@ import (
 	"code.dogecoin.org/gossip/node"
 
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/address"
 )
 
 const OldestAddrTime = -(30 * 24) * time.Hour // 30 days in the past
@@ -35,12 +36,12 @@ type peerConn struct {
 	receive    map[dnet.Tag4CC]chan dnet.Message
 	send       chan dnet.RawMessage // raw message
 	mutex      sync.Mutex
-	addr       spec.Address // Peer's public address
-	peerPub    [32]byte     // Peer's pubkey (pre-set for outbound, if known)
-	nodeKey    dnet.KeyPair // [const] to sign `Addr` messages (key for THIS node)
+	addr       address.Address // Peer's public address
+	peerPub    [32]byte        // Peer's pubkey (pre-set for outbound, if known)
+	nodeKey    dnet.KeyPair    // [const] to sign `Addr` messages (key for THIS node)
 }
 
-func newPeer(conn net.Conn, addr spec.Address, peerPub [32]byte, outbound bool, hasPub bool, ns *NetService) *peerConn {
+func newPeer(conn net.Conn, addr address.Address, peerPub [32]byte, outbound bool, hasPub bool, ns *NetService) *peerConn {
 	peer := &peerConn{
 		ns:         ns,
 		conn:       conn,

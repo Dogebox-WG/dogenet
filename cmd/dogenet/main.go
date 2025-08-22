@@ -18,6 +18,7 @@ import (
 
 	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/address"
 	"code.dogecoin.org/dogenet/pkg/dogenet"
 )
 
@@ -26,7 +27,7 @@ const DogeNetDefaultPort = dnet.DogeNetDefaultPort
 const DBFile = "dogenet.db"
 const DefaultStorage = "./storage"
 
-var HandlerDefaultBind = spec.BindTo{Network: "unix", Address: "/tmp/dogenet.sock"} // const
+var HandlerDefaultBind = address.BindTo{Network: "unix", Address: "/tmp/dogenet.sock"} // const
 
 var stderr = log.New(os.Stderr, "", 0)
 
@@ -211,7 +212,7 @@ func parseIPPort(arg string, name string, defaultPort uint16) (dnet.Address, err
 	return res, nil
 }
 
-func parseBindTo(arg string, name string) (spec.BindTo, error) {
+func parseBindTo(arg string, name string) (address.BindTo, error) {
 	if strings.HasPrefix(arg, "/") {
 		// unix socket path.
 		ent, err := os.Stat(arg)
@@ -221,34 +222,34 @@ func parseBindTo(arg string, name string) (spec.BindTo, error) {
 				dir := path.Dir(arg)
 				ent, err := os.Stat(dir)
 				if err != nil || !ent.IsDir() {
-					return spec.BindTo{}, fmt.Errorf("bad --%v: directory not found: %v", name, dir)
+					return address.BindTo{}, fmt.Errorf("bad --%v: directory not found: %v", name, dir)
 				}
 				// valid binding.
-				return spec.BindTo{Network: "unix", Address: arg}, nil
+				return address.BindTo{Network: "unix", Address: arg}, nil
 			}
-			return spec.BindTo{}, fmt.Errorf("bad --%v: %v", name, err)
+			return address.BindTo{}, fmt.Errorf("bad --%v: %v", name, err)
 		}
 		if !ent.IsDir() {
 			// exists, not a directory.
 			err = os.Remove(arg)
 			if err != nil {
-				return spec.BindTo{}, fmt.Errorf("bad --%v: cannot remove existing file: %v", name, arg)
+				return address.BindTo{}, fmt.Errorf("bad --%v: cannot remove existing file: %v", name, arg)
 			}
 			// valid binding.
-			return spec.BindTo{Network: "unix", Address: arg}, nil
+			return address.BindTo{Network: "unix", Address: arg}, nil
 		} else {
-			return spec.BindTo{}, fmt.Errorf("bad --%v: path is a directory: %v", name, arg)
+			return address.BindTo{}, fmt.Errorf("bad --%v: path is a directory: %v", name, arg)
 		}
 	} else {
 		addr, err := parseIPPort(arg, name, 0)
 		if err != nil {
-			return spec.BindTo{}, fmt.Errorf("bad --%v: %v", name, err)
+			return address.BindTo{}, fmt.Errorf("bad --%v: %v", name, err)
 		}
 		if addr.Port == 0 {
-			return spec.BindTo{}, fmt.Errorf("bad --%v: must specify a port", name)
+			return address.BindTo{}, fmt.Errorf("bad --%v: must specify a port", name)
 		}
 		// valid binding.
-		return spec.BindTo{Network: "tcp", Address: addr.String()}, nil
+		return address.BindTo{Network: "tcp", Address: addr.String()}, nil
 	}
 }
 

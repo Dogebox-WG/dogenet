@@ -5,9 +5,9 @@ import (
 
 	"code.dogecoin.org/dogenet/internal/announce"
 	"code.dogecoin.org/dogenet/internal/netsvc"
-	"code.dogecoin.org/dogenet/internal/spec"
 	"code.dogecoin.org/dogenet/internal/store"
 	"code.dogecoin.org/dogenet/internal/web"
+	"code.dogecoin.org/dogenet/pkg/address"
 	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/governor"
 )
@@ -17,7 +17,7 @@ type DogeNetConfig struct {
 	DBFile       string
 	Binds        []dnet.Address
 	BindWeb      []dnet.Address
-	HandlerBind  spec.BindTo
+	HandlerBind  address.BindTo
 	NodeKey      dnet.KeyPair
 	AllowLocal   bool
 	Public       dnet.Address

@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/address"
 	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/governor"
 )
 
-func New(bind spec.Address, store spec.Store, netSvc spec.NetSvc) governor.Service {
+func New(bind address.Address, store spec.Store, netSvc spec.NetSvc) governor.Service {
 	mux := http.NewServeMux()
 	a := &WebAPI{
 		_store: store,

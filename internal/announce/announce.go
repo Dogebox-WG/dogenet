@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"code.dogecoin.org/dogenet/internal/spec"
+	"code.dogecoin.org/dogenet/pkg/address"
 	"code.dogecoin.org/gossip/dnet"
 	"code.dogecoin.org/gossip/node"
 	"code.dogecoin.org/governor"
@@ -39,7 +40,7 @@ type Announce struct {
 	useReflector bool                  // use reflector to obtain public address
 }
 
-func New(public spec.Address, nodeKey dnet.KeyPair, store spec.Store, receiver spec.AnnounceReceiver, changes chan any, useReflector bool) *Announce {
+func New(public address.Address, nodeKey dnet.KeyPair, store spec.Store, receiver spec.AnnounceReceiver, changes chan any, useReflector bool) *Announce {
 	return &Announce{
 		_store:   store,
 		nodeKey:  nodeKey,
@@ -212,7 +213,7 @@ func (ns *Announce) generateAnnounce(newMsg node.AddressMsg) (raw dnet.RawMessag
 	// update this node in the local database.
 	// this makes the node visible to services on the local node.
 	nodePub := ns.nodeKey.Pub[:]
-	nodeAddr := spec.Address{Host: newMsg.Address, Port: newMsg.Port}
+	nodeAddr := address.Address{Host: newMsg.Address, Port: newMsg.Port}
 	time := newMsg.Time.Local().Unix()
 	_, err = ns.store.AddNetNode(nodePub, nodeAddr, time, newMsg.Owner, newMsg.Channels, payload, sig)
 	if err != nil {
